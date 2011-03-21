@@ -64,6 +64,8 @@ window.onload = function() {
                     if (this.w < 0 ) {
                         this._state = 'done';
                     }
+                } else if (this._state === 'done') {
+                    this.destroy();
                 }
             });
         },
@@ -76,14 +78,16 @@ window.onload = function() {
         }
     });
 
-    var test = Crafty.e("2D, DOM, color, expand")
-        .attr({x: Crafty.viewport.width/4, y: Crafty.viewport.height/2})
-        .color('blue');
-
+    var singleton = null;
     Crafty.addEvent(this, Crafty.stage.elem, 'click', function(e) {
         var x = e.clientX - Crafty.stage.x + document.body.scrollLeft + document.documentElement.scrollLeft;
         var y = e.clientY - Crafty.stage.y + document.body.scrollTop + document.documentElement.scrollTop;
-        test.restart(x, y);
+
+        if (singleton === null) {
+            singleton = Crafty.e("2D, DOM, color, expand")
+            .attr({x:x, y:y})
+            .color('blue');
+        }
     });
 }
 
