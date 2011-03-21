@@ -28,36 +28,62 @@ window.onload = function() {
         });
 
     Crafty.c('expand', {
-        _expanding: true,
+        _state: 'expanding',
+        _alternate: false,
         init: function() {
             if (!this.has('tween')) this.addComponent('tween');
 
             this.bind('enterframe', function(e) {
-                if (this._expanding) {
+                if (this._state === 'expanding') {
                     this.w += 1;
                     this.h += 1;
 
+                    if (this._alternate) {
+                        this.x -= 1;
+                        this.y -=1;
+                        this._alternate = false;
+                    } else {
+                        this._alternate = true;
+                    }
+
                     if (this.w > 64 ) {
-                        this._expanding = false;
+                        this._state = 'collapsing';
+                    }
+                } else if (this._state === 'collapsing') {
+                    this.w -= 1;
+                    this.h -= 1;
+
+                    if (this._alternate) {
+                        this.x += 1;
+                        this.y +=1;
+                        this._alternate = false;
+                    } else {
+                        this._alternate = true;
+                    }
+
+                    if (this.w < 0 ) {
+                        this._state = 'done';
                     }
                 }
             });
         },
-        restart: function() {
-            this.w = 16, this.h = 16;
-            this._expanding = true;
+        restart: function(x,y) {
+            if (this._state !== 'expanding' && this._state !== 'collapsing') {
+                // this.w = 16, this.h = 16;
+                this.x = x, this.y = y;
+                this._state = 'expanding';
+            }
         }
     });
 
     var test = Crafty.e("2D, DOM, color, expand")
-        .attr({x: Crafty.viewport.width/4, y: Crafty.viewport.height/2, w: 16, h:16})
+        .attr({x: Crafty.viewport.width/4, y: Crafty.viewport.height/2})
         .color('blue');
 
     Crafty.addEvent(this, Crafty.stage.elem, 'click', function(e) {
-        console.log('new elem', e.x, e.y, e);
-        test.attr({x:e.clientX, y:e.clientY});
-        test.restart();
-        // Crafty.e("2D, DOM, color").color('blue').attr({x: e.x, y: e.y, w: 16, h:16});
+        var x = e.clientX - Crafty.stage.x + document.body.scrollLeft + document.documentElement.scrollLeft;
+        var y = e.clientY - Crafty.stage.y + document.body.scrollTop + document.documentElement.scrollTop;
+        test.restart(x, y);
     });
 }
 
