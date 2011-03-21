@@ -3,36 +3,11 @@ window.onload = function() {
     //and height
     Crafty.init(50, 580, 225);
     
-    //create a player entity with premade components
-    var ball = Crafty.e("2D, DOM, fourway, color")
-        .attr({x: Crafty.viewport.width / 2, w: 16, h: 16, xspeed: 1, yspeed: 2})
-        .color('red')
-        .bind("enterframe", function() {
-        	this.x += this.xspeed;
-        	this.y += this.yspeed;
-
-        	if (this._x + this._w > Crafty.viewport.width) {
-                this.xspeed = -this.xspeed;
-        		// this.x = 0;
-        	} else if (this._x < 0) {
-        		// this.x = Crafty.viewport.width;
-                this.xspeed = -this.xspeed;
-        	}
-        	if (this._y + this._h > Crafty.viewport.height) {
-        		// this.y = 0;
-                this.yspeed = -this.yspeed;
-        	} else if (this._y < 0) {
-        		// this.y = Crafty.viewport.height;
-                this.yspeed = -this.yspeed;
-        	}
-        });
 
     Crafty.c('expand', {
         _state: 'expanding',
         _alternate: false,
-        init: function() {
-            if (!this.has('tween')) this.addComponent('tween');
-
+        expand: function() {
             this.bind('enterframe', function(e) {
                 if (this._state === 'expanding') {
                     this.w += 1;
@@ -78,6 +53,7 @@ window.onload = function() {
         }
     });
 
+    // Only allow the player to interact once
     var singleton = null;
     Crafty.addEvent(this, Crafty.stage.elem, 'click', function(e) {
         var x = e.clientX - Crafty.stage.x + document.body.scrollLeft + document.documentElement.scrollLeft;
@@ -86,9 +62,58 @@ window.onload = function() {
         if (singleton === null) {
             singleton = Crafty.e("2D, DOM, color, expand")
             .attr({x:x, y:y})
-            .color('blue');
+            .color('blue')
+            .expand();
         }
     });
+
+    // ball component player is trying to hit
+    Crafty.c('ball', {    // "2D, DOM, color, collision, expand")
+        init: function() {
+            if (!this.has('collision')) this.addComponent('collision');
+            if (!this.has('expand')) this.addComponent('expand');
+
+            this.attr({
+                x: Crafty.viewport.width * Math.random(), 
+                y: Crafty.viewport.height*Math.random(), 
+                w: 16, 
+                h: 16, 
+                xspeed: 1, 
+                yspeed: 2, 
+                expanding: false})
+            .bind("enterframe", function() {
+                this.x += this.xspeed;
+                this.y += this.yspeed;
+    
+                if (this._x + this._w > Crafty.viewport.width) {
+                    this.xspeed = -this.xspeed;
+                    // this.x = 0;
+                } else if (this._x < 0) {
+                    // this.x = Crafty.viewport.width;
+                    this.xspeed = -this.xspeed;
+                }
+                if (this._y + this._h > Crafty.viewport.height) {
+                    // this.y = 0;
+                    this.yspeed = -this.yspeed;
+                } else if (this._y < 0) {
+                    // this.y = Crafty.viewport.height;
+                    this.yspeed = -this.yspeed;
+                }
+            })
+            .onhit('expand', function(data) {
+                if (this.expanding === false) {
+                    this.xspeed = 0, this.yspeed = 0;
+                    this.expand();
+                    this.expanding = true;
+                }
+            });
+        }
+    });
+
+    // create the balls
+    for (var i = 0; i<5; i++) {
+        Crafty.e("2D, DOM, color, ball").color('red');
+    }
 }
 
 
