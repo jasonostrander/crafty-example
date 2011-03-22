@@ -2,12 +2,28 @@ window.onload = function() {
     //setup the Crafty game with an FPS of 50 and stage width
     //and height
     Crafty.init(50, 580, 225);
+    var score = Crafty.e('2D, DOM, color, text')
+        .attr({
+            x: 30,
+            y: 30,
+            h: 32,
+            w: 32,
+            _score: 0,
+            incrementScore: function() {
+                console.log(this);
+                this._score += 1;
+                this.text(this._score + '/1');
+            }
+        })
+        .color('black')
+        .text('0/1')
+        .font('18pt Arial');
     
-
     Crafty.c('expand', {
-        _state: 'expanding',
+        _state: 'idle',
         _alternate: false,
         expand: function() {
+            this._state = 'expanding';
             this.bind('enterframe', function(e) {
                 if (this._state === 'expanding') {
                     this.w += 1;
@@ -74,12 +90,12 @@ window.onload = function() {
             if (!this.has('expand')) this.addComponent('expand');
 
             this.attr({
-                x: Crafty.viewport.width * Math.random(), 
-                y: Crafty.viewport.height*Math.random(), 
-                w: 16, 
-                h: 16, 
-                xspeed: 1, 
-                yspeed: 2, 
+                x: (Crafty.viewport.width-16) * Math.random(),
+                y: (Crafty.viewport.height-16)*Math.random(),
+                w: 16,
+                h: 16,
+                xspeed: 1,
+                yspeed: 2,
                 expanding: false})
             .bind("enterframe", function() {
                 this.x += this.xspeed;
@@ -87,24 +103,21 @@ window.onload = function() {
     
                 if (this._x + this._w > Crafty.viewport.width) {
                     this.xspeed = -this.xspeed;
-                    // this.x = 0;
                 } else if (this._x < 0) {
-                    // this.x = Crafty.viewport.width;
                     this.xspeed = -this.xspeed;
                 }
                 if (this._y + this._h > Crafty.viewport.height) {
-                    // this.y = 0;
                     this.yspeed = -this.yspeed;
                 } else if (this._y < 0) {
-                    // this.y = Crafty.viewport.height;
                     this.yspeed = -this.yspeed;
                 }
             })
             .onhit('expand', function(data) {
-                if (this.expanding === false) {
+                if (this.expanding === false && data[0].obj._state === 'expanding') {
                     this.xspeed = 0, this.yspeed = 0;
                     this.expand();
                     this.expanding = true;
+                    score.incrementScore();
                 }
             });
         }
