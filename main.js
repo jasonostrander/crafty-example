@@ -4,6 +4,9 @@ window.onload = function() {
     Crafty.init(50, 580, 225);
     
     var levels= [3, 5, 7, 11, 17, 25];
+    var current = levels.shift();
+    var hits = 0;
+    var singleton = null;
 
     Crafty.scene('main', function() {
     
@@ -44,6 +47,7 @@ window.onload = function() {
                                 this._state = 'done';
                             }
                         } else if (this._state === 'done') {
+                            if (this.hasOwnProperty('updateGameState')) this.updateGameState();
                             this.destroy();
                         }
                     });
@@ -70,7 +74,17 @@ window.onload = function() {
                         h: 16,
                         xspeed: 1,
                         yspeed: 2,
-                        expanding: false})
+                        expanding: false,
+                        updateGameState: function() {
+                            hits -= 1;
+                            if (hits <= 0) {
+                                // fiinish the game
+                                current = levels.shift();
+                                singleton = null;
+                                setTimeout(function() {Crafty.scene('main');}, 1000);
+                            }
+                        }
+                    })
                     .bind("enterframe", function() {
                         this.x += this.xspeed;
                         this.y += this.yspeed;
@@ -92,6 +106,7 @@ window.onload = function() {
                             this.expand();
                             this.expanding = true;
                             score.incrementScore();
+                            hits += 1;
                         }
                     });
                 }
@@ -116,7 +131,6 @@ window.onload = function() {
             .font('18pt Arial');
 
         // Only allow the player to interact once
-        var singleton = null;
         Crafty.addEvent(this, Crafty.stage.elem, 'click', function(e) {
             var x = e.clientX - Crafty.stage.x + document.body.scrollLeft + document.documentElement.scrollLeft;
             var y = e.clientY - Crafty.stage.y + document.body.scrollTop + document.documentElement.scrollTop;
@@ -130,7 +144,7 @@ window.onload = function() {
             });
     
             // create the balls
-            for (var i = 0; i<5; i++) {
+            for (var i = 0; i<current; i++) {
                 Crafty.e("2D, DOM, color, ball").color('red');
         }
     });
