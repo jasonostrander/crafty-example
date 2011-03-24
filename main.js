@@ -3,7 +3,14 @@ window.onload = function() {
     //and height
     Crafty.init(50, 580, 225);
     
-    var levels= [3, 5, 7, 11, 17, 25];
+    var levels= [
+        {required:1, total:4},
+        {required:2, total:4},
+        {required:4, total:7},
+        {required:5, total:12},
+        {required:10, total:17},
+        {required:17, total:25}
+    ]
     var current = levels.shift();
     var hits = 0;
     var singleton = null;
@@ -47,7 +54,7 @@ window.onload = function() {
                                 this._state = 'done';
                             }
                         } else if (this._state === 'done') {
-                            if (this.hasOwnProperty('updateGameState')) this.updateGameState();
+                            if (!this.has('player')) updateGameState();
                             this.destroy();
                         }
                     });
@@ -74,16 +81,7 @@ window.onload = function() {
                         h: 16,
                         xspeed: 1,
                         yspeed: 2,
-                        expanding: false,
-                        updateGameState: function() {
-                            hits -= 1;
-                            if (hits <= 0) {
-                                // fiinish the game
-                                current = levels.shift();
-                                singleton = null;
-                                setTimeout(function() {Crafty.scene('main');}, 1000);
-                            }
-                        }
+                        expanding: false
                     })
                     .bind("enterframe", function() {
                         this.x += this.xspeed;
@@ -113,6 +111,7 @@ window.onload = function() {
         });
 
 
+        console.log(current);
         var score = Crafty.e('2D, DOM, color, text')
             .attr({
                 x: 30,
@@ -120,14 +119,20 @@ window.onload = function() {
                 h: 32,
                 w: 32,
                 _score: 0,
+                _required: current.required,
                 incrementScore: function() {
                     console.log(this);
                     this._score += 1;
-                    this.text(this._score + '/1');
+                    this.text(this._score + '/' + this._required);
+                },
+                nextLevel: function() {
+                    if (this._score >= this._required)
+                        return true;
+                    return false;
                 }
             })
             .color('black')
-            .text('0/1')
+            .text('0/'+current.required)
             .font('18pt Arial');
 
         // Only allow the player to interact once
@@ -136,7 +141,7 @@ window.onload = function() {
             var y = e.clientY - Crafty.stage.y + document.body.scrollTop + document.documentElement.scrollTop;
     
                 if (singleton === null) {
-                    singleton = Crafty.e("2D, DOM, color, expand")
+                    singleton = Crafty.e("2D, DOM, color, expand, player")
                     .attr({x:x, y:y})
                     .color('blue')
                     .expand();
@@ -144,11 +149,28 @@ window.onload = function() {
             });
     
             // create the balls
-            for (var i = 0; i<current; i++) {
+            for (var i = 0; i<current.total; i++) {
                 Crafty.e("2D, DOM, color, ball").color('red');
         }
+
+        function updateGameState() {
+            hits -= 1;
+            if (hits <= 0) {
+                if (score.nextLevel()) {
+                    // fiinish the game
+                    current = levels.shift();
+                    singleton = null;
+                    setTimeout(function() {Crafty.scene('main');}, 500);
+                } else {
+                    console.log('level failed');
+                }
+            }
+        }
+
     });
     Crafty.scene('main');
+
+
 }
 
 
