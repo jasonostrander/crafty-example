@@ -54,7 +54,7 @@ window.onload = function() {
                                 this._state = 'done';
                             }
                         } else if (this._state === 'done') {
-                            if (!this.has('player')) updateGameState();
+                            updateGameState();
                             this.destroy();
                         }
                     });
@@ -110,8 +110,6 @@ window.onload = function() {
                 }
         });
 
-
-        console.log(current);
         var score = Crafty.e('2D, DOM, color, text')
             .attr({
                 x: 30,
@@ -154,10 +152,18 @@ window.onload = function() {
         }
 
         function updateGameState() {
-            hits -= 1;
-            if (hits <= 0) {
+            var ids = Crafty('expand').toArray();
+            var finish = true;
+            for (var i = 0; i<ids.length; i++) {
+                var e = Crafty(ids[i]);
+                if ( !(e._state === 'done' || e._state === 'idle') ) {
+                    finish = false;
+                }
+            }
+
+            if (finish) {
                 if (score.nextLevel()) {
-                    // fiinish the game
+                    // finish the game
                     current = levels.shift();
                     singleton = null;
                     setTimeout(function() {Crafty.scene('main');}, 500);
@@ -166,11 +172,9 @@ window.onload = function() {
                 }
             }
         }
-
     });
+
     Crafty.scene('main');
-
-
 }
 
 
