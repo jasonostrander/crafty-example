@@ -6,10 +6,10 @@ window.onload = function() {
     var levels= [
         {required:1, total:4},
         {required:2, total:4},
-        {required:4, total:7},
-        {required:5, total:12},
-        {required:10, total:17},
-        {required:17, total:25}
+        // {required:4, total:7},
+        // {required:5, total:12},
+        // {required:10, total:17},
+        // {required:17, total:25}
     ]
     var current = 0;
     var hits = 0;
@@ -17,16 +17,16 @@ window.onload = function() {
     var prompt = 'Click to begin';
 
     var toast = Crafty.scene('toast', function() {
-        var toast = Crafty.e('2D, DOM, color, text')
+        var toast = Crafty.e('2D, DOM, text')
             .attr({
-                h: Crafty.viewport.height/2,
-                w: Crafty.viewport.width/2,
-                x: Crafty.viewport.width/4,
-                y: Crafty.viewport.height/4
+                h: 50,
+                w: 200,
+                x: 200,
+                y: 100
             })
-            .color('black')
             .text(prompt)
-            .font('18pt Arial');
+            .font('18pt Arial black')
+            .css({color: 'black'});
 
         var fn = function(e) {
             Crafty.removeEvent(this, Crafty.stage.elem, 'click', fn);
@@ -75,10 +75,10 @@ window.onload = function() {
                                 this._state = 'done';
                             }
                         } else if (this._state === 'done') {
-                            updateGameState();
                             this.destroy();
                         }
                     });
+                    return this;
                 },
                 restart: function(x,y) {
                     if (this._state !== 'expanding' && this._state !== 'collapsing') {
@@ -86,6 +86,7 @@ window.onload = function() {
                         this.x = x, this.y = y;
                         this._state = 'expanding';
                     }
+                    return this;
                 }
             });
     
@@ -149,9 +150,9 @@ window.onload = function() {
                     return false;
                 }
             })
-            .color('black')
             .text('0/'+levels[current].required)
-            .font('18pt Arial');
+            .font('18pt Arial')
+            .css({color: 'black'});
 
         // Only allow the player to interact once
         Crafty.addEvent(this, Crafty.stage.elem, 'click', function(e) {
@@ -161,10 +162,14 @@ window.onload = function() {
                 if (singleton == null) {
                     singleton = Crafty.e("2D, DOM, color, expand, player")
                     .attr({x:x, y:y})
-                    .color('blue')
-                    .expand();
+                    .color('blue');
+
+                    singleton.expand();
+
+                    // recursively called till all balls expanded
+                    setTimeout(updateGameState, 1000);
                 }
-            });
+        });
     
             // create the balls
             for (var i = 0; i<levels[current].total; i++) {
@@ -181,7 +186,11 @@ window.onload = function() {
                 }
             }
 
+            console.log(finish);
+
             if (finish) {
+                singleton = null;
+
                 if (score.nextLevel()) {
                     // finish the game
                     current += 1;
@@ -193,15 +202,16 @@ window.onload = function() {
                         current = 0;
                         setTimeout(function() {Crafty.scene('toast');}, 500);
                     } else {
-                        singleton = null;
                         prompt = 'You won! Click to play the next level.'
                         setTimeout(function() {Crafty.scene('toast');}, 500);
                     }
                 } else {
                     console.log('level failed');
                     prompt = 'Level failed. Click to try again.'
-                    setTimeout(function() {Crafty.scene('toast');}, 500);
+                    Crafty.scene('toast');
                 }
+            } else {
+                setTimeout(updateGameState, 1000);
             }
         }
     });
