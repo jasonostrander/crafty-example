@@ -16,8 +16,8 @@ window.onload = function() {
     var singleton = null;
     var prompt = 'Click to begin';
 
-    var intro = Crafty.scene('intro', function() {
-        var intro = Crafty.e('2D, DOM, color, text')
+    var toast = Crafty.scene('toast', function() {
+        var toast = Crafty.e('2D, DOM, color, text')
             .attr({
                 h: Crafty.viewport.height/2,
                 w: Crafty.viewport.width/2,
@@ -191,21 +191,22 @@ window.onload = function() {
                         console.log('Game won!');
                         prompt = 'You won! Congratulations! Click to play again.'
                         current = 0;
-                        setTimeout(function() {Crafty.scene('intro');}, 500);
+                        setTimeout(function() {Crafty.scene('toast');}, 500);
                     } else {
                         singleton = null;
-                        setTimeout(function() {Crafty.scene('main');}, 500);
+                        prompt = 'You won! Click to play the next level.'
+                        setTimeout(function() {Crafty.scene('toast');}, 500);
                     }
                 } else {
                     console.log('level failed');
                     prompt = 'Level failed. Click to try again.'
-                    setTimeout(function() {Crafty.scene('intro');}, 500);
+                    setTimeout(function() {Crafty.scene('toast');}, 500);
                 }
             }
         }
     });
 
-    Crafty.scene('intro');
+    Crafty.scene('toast');
 }
 
 
