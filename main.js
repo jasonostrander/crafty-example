@@ -6,10 +6,10 @@ window.onload = function() {
     var levels= [
         {required:1, total:4},
         {required:2, total:4},
-        // {required:4, total:7},
-        // {required:5, total:12},
-        // {required:10, total:17},
-        // {required:17, total:25}
+        {required:4, total:7},
+        {required:5, total:12},
+        {required:10, total:17},
+        {required:17, total:25}
     ]
     var current = 0;
     var hits = 0;
@@ -33,7 +33,12 @@ window.onload = function() {
             Crafty.scene('main');
         };
 
-        Crafty.addEvent(this, Crafty.stage.elem, 'click', fn);
+        Crafty.e('2D, DOM, mouse')
+            .attr({w: Crafty.viewport.width, h: Crafty.viewport.height})
+            .areaMap([0,0], [Crafty.viewport.width, 0], 
+                [Crafty.viewport.width, Crafty.viewport.height], 
+                [0, Crafty.viewport.height])
+            .bind('mousedown', fn)
     });
 
     Crafty.scene('main', function() {
@@ -154,8 +159,7 @@ window.onload = function() {
             .font('18pt Arial')
             .css({color: 'black'});
 
-        // Only allow the player to interact once
-        Crafty.addEvent(this, Crafty.stage.elem, 'click', function(e) {
+        var fn = function(e) {
             var x = e.clientX - Crafty.stage.x + document.body.scrollLeft + document.documentElement.scrollLeft;
             var y = e.clientY - Crafty.stage.y + document.body.scrollTop + document.documentElement.scrollTop;
     
@@ -169,7 +173,15 @@ window.onload = function() {
                     // recursively called till all balls expanded
                     setTimeout(updateGameState, 1000);
                 }
-        });
+            };
+
+        // Only allow the player to interact once
+        Crafty.e('2D, DOM, mouse')
+            .attr({w: Crafty.viewport.width, h: Crafty.viewport.height})
+            .areaMap([0,0], [Crafty.viewport.width, 0], 
+                [Crafty.viewport.width, Crafty.viewport.height], 
+                [0, Crafty.viewport.height])
+            .bind('mousedown', fn);
     
             // create the balls
             for (var i = 0; i<levels[current].total; i++) {
