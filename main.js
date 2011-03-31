@@ -1,7 +1,7 @@
 window.onload = function() {
     //setup the Crafty game with an FPS of 50 and stage width
     //and height
-    Crafty.init(50, 580, 225);
+    Crafty.init(50, 580, 280);
     
     var levels= [
         {required:1, total:4},
@@ -20,13 +20,13 @@ window.onload = function() {
         var toast = Crafty.e('2D, DOM, text')
             .attr({
                 h: 50,
-                w: 200,
-                x: 200,
-                y: 100
+                w: Crafty.viewport.width,
+                x: 0,
+                y: Crafty.viewport.height/2 - 25
             })
             .text(prompt)
             .font('18pt Arial black')
-            .css({color: 'black'});
+            .css({color: 'black', 'text-align': 'center'});
 
         var fn = function(e) {
             Crafty.removeEvent(this, Crafty.stage.elem, 'click', fn);
@@ -157,7 +157,7 @@ window.onload = function() {
             })
             .text('0/'+levels[current].required)
             .font('18pt Arial')
-            .css({color: 'black'});
+            .css({color: 'black', 'text-align': 'center'});
 
         var fn = function(e) {
             var x = e.clientX - Crafty.stage.x + document.body.scrollLeft + document.documentElement.scrollLeft;
@@ -212,10 +212,10 @@ window.onload = function() {
                         console.log('Game won!');
                         prompt = 'You won! Congratulations! Click to play again.'
                         current = 0;
-                        setTimeout(function() {Crafty.scene('toast');}, 500);
+                        Crafty.scene('toast');
                     } else {
-                        prompt = 'You won! Click to play the next level.'
-                        setTimeout(function() {Crafty.scene('toast');}, 500);
+                        prompt = 'Well done! Click to play the next level.'
+                        Crafty.scene('toast');
                     }
                 } else {
                     console.log('level failed');
