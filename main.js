@@ -125,11 +125,15 @@ window.onload = function() {
                     }
                 })
                 .onhit('expand', function(data) {
-                    if (this.expanding === false && data[0].obj._state === 'expanding') {
-                        this.xspeed = 0, this.yspeed = 0;
-                        this.expand();
-                        this.expanding = true;
-                        score.incrementScore();
+                    if (data) {
+                        for (var i=0; i<data.length; i++) {
+                            if (this.expanding === false && data[i].obj._state !== 'idle') {
+                                this.xspeed = 0, this.yspeed = 0;
+                                this.expand();
+                                this.expanding = true;
+                                score.incrementScore();
+                            }
+                        }
                     }
                 });
             }
@@ -183,8 +187,8 @@ window.onload = function() {
     
             // create the balls
             for (var i = 0; i<levels[current].total; i++) {
-                Crafty.e("2D, DOM, color, ball").color('red');
-        }
+               Crafty.e("2D, DOM, color, ball").color('red');
+            }
 
         function updateGameState() {
             var ids = Crafty('expand').toArray();
