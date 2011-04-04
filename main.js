@@ -7,9 +7,10 @@ window.onload = function() {
         {required:1, total:4},
         {required:2, total:4},
         {required:4, total:7},
-        {required:5, total:12},
-        {required:10, total:17},
-        {required:17, total:25}
+        {required:7, total:12},
+        {required:12, total:17},
+        {required:17, total:25},
+        {required:25, total:25}
     ]
     var current = 0;
     var singleton = null;
@@ -51,7 +52,7 @@ window.onload = function() {
                     if (this._state === 'expanding') {
                         this.w += 1;
                         this.h += 1;
-    
+
                         if (this._alternate) {
                             this.x -= 1;
                             this.y -=1;
@@ -95,10 +96,20 @@ window.onload = function() {
         });
 
         // ball component player is trying to hit
-        Crafty.c('ball', {    // "2D, DOM, color, collision, expand")
+        Crafty.c('ball', {
             init: function() {
                 if (!this.has('collision')) this.addComponent('collision');
                 if (!this.has('expand')) this.addComponent('expand');
+
+                // make it a ball
+                // maintain shape when expanding by setting to large value
+                this.css({
+                    '-moz-border-radius': '64px',
+                    '-webkit-border-radius': '64px'
+                });
+
+                // Simulate cirle collision area with polygon
+                // this.collision(new Crafty.polygon([8,0], [16,8], [8,16], [0,8]) );
 
                 this.attr({
                     x: (Crafty.viewport.width-16) * Math.random(),
@@ -168,7 +179,11 @@ window.onload = function() {
                 if (singleton == null) {
                     singleton = Crafty.e("2D, DOM, color, expand, player")
                     .attr({x:x, y:y})
-                    .color('blue');
+                    .color('blue')
+                    .css({
+                        '-moz-border-radius': '64px',
+                        '-webkit-border-radius': '64px'
+                    });
 
                     singleton.expand();
 
@@ -190,6 +205,9 @@ window.onload = function() {
                Crafty.e("2D, DOM, color, ball").color('red');
             }
 
+            // Crafty.e("2D, DOM, color, ball").color('red').attr({xspeed: 0, yspeed: 0, x: 200, y:200});
+            // Crafty.e("2D, DOM, color, ball").color('blue').attr({xspeed: 0, yspeed: 0, x: 229, y:229}).expand();
+
         function updateGameState() {
             var ids = Crafty('expand').toArray();
             var finish = true;
@@ -199,8 +217,6 @@ window.onload = function() {
                     finish = false;
                 }
             }
-
-            console.log(finish);
 
             if (finish) {
                 singleton = null;
