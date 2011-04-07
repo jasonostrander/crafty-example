@@ -1,10 +1,10 @@
 /*!
- * Crafty v0.3
- * http://craftyjs.com
- *
- * Copyright 2010, Louis Stowasser
- * Dual licensed under the MIT or GPL licenses.
- */
+* Crafty v0.4
+* http://craftyjs.com
+*
+* Copyright 2010, Louis Stowasser
+* Dual licensed under the MIT or GPL licenses.
+*/
 
 (function(window, undefined) {
 
@@ -20,8 +20,10 @@ var Crafty = function(selector) {
 	entities = {}, //map of entities and their data
 	handlers = {}, //global event handlers
 	onloads = [], //temporary storage of onload handlers
-	interval,
 	tick,
+	tickID,
+	
+	pausedEvents = {},
 	
 	slice = Array.prototype.slice,
 	rlist = /\s*,\s*/,
@@ -135,6 +137,10 @@ Crafty.fn = Crafty.prototype = {
 		ul = uninit.length;
 		for(;c<ul;c++) {
 			comp = components[uninit[c]];
+			//Backward compat
+			if (typeof comp == 'undefined'){
+				comp = components[uninit[c].substr(0, 1).toUpperCase() + uninit[c].substr(1)];
+			} 
 			this.extend(comp);
 			
 			//if constructor, call it
@@ -143,7 +149,22 @@ Crafty.fn = Crafty.prototype = {
 			}
 		}
 		
+		this.trigger("component");
 		return this;
+	},
+	
+	requires: function(list) {
+		var comps = list.split(rlist),
+			i = 0, l = comps.length,
+			comp;
+		
+		//loop over the list of components and add if needed
+		for(;i<l;++i) {
+			comp = comps[i];
+			if(!this.has(comp)) this.addComponent(comp);
+		}
+
+        return this;
 	},
 	
 	removeComponent: function(id) {
@@ -185,6 +206,7 @@ Crafty.fn = Crafty.prototype = {
 				fn.call(self);
 			}, duration);
 		});
+        return this;
 	},
 	
 	bind: function(event, fn) {
@@ -213,7 +235,7 @@ Crafty.fn = Crafty.prototype = {
 		this.each(function() {
 			var hdl = handlers[event], i = 0, l, current;
 			//if no events, cancel
-			if(hdl[this[0]]) l = hdl[this[0]].length;
+			if(hdl && hdl[this[0]]) l = hdl[this[0]].length;
 			else return this;
 			
 			//if only one event logged or no function, delete all
@@ -266,6 +288,23 @@ Crafty.fn = Crafty.prototype = {
 		return this;
 	},
 	
+	clone: function() {
+		var comps = this.__c,
+			comp,
+			prop,
+			clone = Crafty.e();
+			
+		for(comp in comps) {
+			clone.addComponent(comp);
+		}
+		for(prop in this) {
+			
+			clone[prop] = this[prop];
+		}
+		
+		return clone;
+	},
+	
 	destroy: function() {
 		//remove all event handlers, delete from entities
 		this.each(function() {
@@ -277,6 +316,143 @@ Crafty.fn = Crafty.prototype = {
 		});
 	}
 };
+
+//Add getter and setter functionality to the Crafty prototype
+(function() {
+var gets = [], //contains [obj. ref, property, getter]
+    sets = [], //contains [obj. ref, property, setter, old value]
+    fallbackActive = false,
+
+    initGetterSetter = function() {
+        fallbackActive = true;
+        Crafty.bind("enterframe", function() {
+            //run the setter if a new value has been assigned and keep track of the new 'old value'
+            for(var i = 0; i < sets.length; i++)
+            {
+                if(sets[i][0][sets[i][1]] !== sets[i][3]) {
+                    sets[i][2].apply(sets[i][0], [ sets[i][0][sets[i][1]] ]);
+                    sets[i][3] = sets[i][0][sets[i][1]];
+                    sets[i][0].trigger("change");
+                }
+            }
+
+            //All setters are evaluated on each frame to pick up external state change.
+            //Therefore side effects should be avoided
+            for(var i = 0; i < gets.length; i++)
+            {
+                var getValue = gets[i][2].apply(gets[i][0], []);
+                if(gets[i][0][gets[i][1]] !== getValue) {
+                    gets[i][0][gets[i][1]] = getValue;
+
+                    //Change in external state must not cause evaluation of setter
+                    for(var j = 0; j < sets.length; j++) {
+                        if(sets[j][1] === gets[i][1]) {
+                            sets[j][3] = getValue;
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+    };
+
+    /**@
+    * #setter
+    * `public object setter(String property, function setter)`
+    *
+    * **Parameters:**
+    *
+    * `property` - `String` The property to gain setter functionality
+    *
+    * `setter` - `function(v)` The function to invoke when a new value is set
+    *
+    * **Returns:**
+    *
+    * Returns the object it was invoked on
+    *
+    * Will use standard javascript functionality to add setter functionality to a property on the object it is invoked on.
+    * In IE<9 a fallback with lower performance will be used.
+    *
+    * ##Use
+    *   this.setter("col", function(v) {
+    *       this.x = 16*v;
+     *  };
+    */
+    Crafty.prototype.setter = function(property, setter) {
+        if(Crafty.support.setter) {
+            this.__defineSetter__(property, function(v) {
+                setter.apply(this, [v]);
+                this.trigger("change");
+            });
+
+            //IE9 supports Object.defineProperty
+        } else if(Crafty.support.defineProperty) {
+
+            Object.defineProperty(this, property, {
+                set: function(v) {
+                    setter.apply(this, [v]);
+                    this.trigger("change");
+                },
+                configurable : true});
+
+        } else {
+
+            //Initialise getter and setter support for IE<9.
+            if(!fallbackActive)
+                initGetterSetter();
+            sets.push([this, property, setter, this[property]]);
+        }
+        return this;
+    };
+
+    /**@
+    * #getter
+    * `public object getter(String property, function getter)`
+    *
+    * **Parameters:**
+    *
+    * `property` - `String` The property to gain getter functionality
+    *
+    * `getter` - `function` The function that returns the value of the property
+    *
+    * **Returns:**
+    *
+    * Returns the object it was invoked on
+    *
+    * Will use standard javascript functionality to add getter functionality to a property on the object it is invoked on.
+    * In IE<9 a fallback that evaluates the getter function in each frame is used.
+    *
+    * ##Use
+    *   this.getter("col", function(v) {
+    *       return this.x / 16;
+     *  };
+    */
+    Crafty.prototype.getter = function(property, getter) {
+        if(Crafty.support.setter) {
+            this.__defineGetter__(property, getter);
+
+            //IE9 supports Object.defineProperty
+        } else if(Crafty.support.defineProperty) {
+
+            Object.defineProperty(this, property, {
+                get: getter,
+                configurable : true
+            });
+        } else {
+
+            //Initialise getter and setter support for IE<9.
+            if(!fallbackActive)
+                initGetterSetter();
+
+            this[property] = getter();
+            gets.push([this, property, getter]);
+        }
+
+        return this;
+    };
+
+})();
+
 //give the init instances the Crafty prototype
 Crafty.fn.init.prototype = Crafty.fn;
 
@@ -286,6 +462,7 @@ Crafty.fn.init.prototype = Crafty.fn;
 */
 Crafty.extend = Crafty.fn.extend = function(obj) {
 	var target = this;
+	
 	//don't bother with nulls
 	if(!obj) return target;
 	
@@ -293,6 +470,7 @@ Crafty.extend = Crafty.fn.extend = function(obj) {
 		if(target === obj[key]) continue; //handle circular reference
 		target[key] = obj[key];
 	}
+	
 	return target;
 };
 
@@ -302,20 +480,70 @@ Crafty.extend({
 		if(arguments.length === 2) {			
 			h = w;
 			w = f;
-			f = 100;
+			f = 60;
 		}
 		
-		FPS = f || 100;
+		FPS = f || 60;
 		
 		Crafty.viewport.init(w,h);
 		
 		//call all arbitrary functions attached to onload
-		this.onload();
+		this.trigger("Load");
 		this.timer.init();
+		
+		return this;
 	},
 	
 	stop: function() {
-		clearInterval(tick);
+		if(typeof tick === "number") clearInterval(tick);
+		
+		var onFrame = window.cancelRequestAnimationFrame ||
+				window.webkitCancelRequestAnimationFrame ||
+				window.mozCancelRequestAnimationFrame ||
+				window.oCancelRequestAnimationFrame ||
+				window.msCancelRequestAnimationFrame ||
+				null;
+					
+		if(onFrame) onFrame(tickID);
+		tick = null;
+		
+		return this;
+	},
+	
+	/**@
+	* #Crafty.pause
+	* Unbinds all enterframe handlers and stores them away
+	* Calling .pause() again will restore previously deactivated handlers.
+	* 
+	* @sign public this Crafty.pause()
+	* @example
+	* Have an entity pause the game when it is clicked.
+	* ~~~
+	* button.bind("click", function() {
+	* 	Crafty.pause(); 
+	* });
+	* ~~~
+	*/
+	pause: function() {
+		if(!this._paused){
+			this.trigger('Pause');
+			this._paused = true;
+			pausedEvents = {};
+			
+			for(handler in handlers['enterframe']){
+				pausedEvents[handler] = handlers['enterframe'][handler];
+				delete handlers['enterframe'][handler];
+			};
+			Crafty.keydown={};
+		} else {
+			this.trigger('Unpause');
+			this._paused = false;
+			
+			for(handler in pausedEvents){
+				handlers['enterframe'][handler] = pausedEvents[handler];
+			};
+		}
+		return this;
 	},
 	
 	timer: {
@@ -324,23 +552,22 @@ Crafty.extend({
 		fps: 0,
 		
 		init: function() {
-			var onEachFrame;
-			if (window.webkitRequestAnimationFrame) {
+			var onFrame = window.requestAnimationFrame ||
+					window.webkitRequestAnimationFrame ||
+					window.mozRequestAnimationFrame ||
+					window.oRequestAnimationFrame ||
+					window.msRequestAnimationFrame ||
+					null,
+			
 				onEachFrame = function(cb) {
-					var _cb = function() { cb(); webkitRequestAnimationFrame(_cb); }
-					_cb();
+					if(onFrame) {
+						tick = function() { cb(); tickID = onFrame(tick); }
+						tick();
+					} else {
+						tick = setInterval(cb, 1000 / FPS);
+					}
 				};
-			} else if (window.mozRequestAnimationFrame) {
-				onEachFrame = function(cb) {
-					var _cb = function() { cb(); mozRequestAnimationFrame(_cb); }
-					_cb();
-				};
-			} else {
-				onEachFrame = function(cb) {
-					setInterval(cb, 1000 / FPS);
-				}
-			}
-
+			
 			onEachFrame(Crafty.timer.step);
 		},
 		
@@ -353,23 +580,24 @@ Crafty.extend({
 				loops = 0;
 				this.prev = this.current;
 				this.current = (+new Date);
-
+				this.fps = (1000 / (this.current-this.prev));
 				while((new Date).getTime() > nextGameTick) {
 					Crafty.trigger("enterframe", {frame: frame++});
 					nextGameTick += skipTicks;
 					loops++;
-					this.fps = loops / this.fpsUpdateFrequency;
+					//this.fps = loops / this.fpsUpdateFrequency;
 				}
-
-				if(loops) Crafty.DrawList.draw();
+				if(loops) {
+					Crafty.DrawManager.draw();
+				}
 			};
 		})(),
-		
+
 		getFPS: function() {
 			return this.fps;
 		}
 	},
-	
+
 	e: function() {
 		var id = UID(), craft;
 		
@@ -390,38 +618,66 @@ Crafty.extend({
 	
 	trigger: function(event, data) {
 		var hdl = handlers[event], h, i, l;
+		//loop over every object bound
 		for(h in hdl) {
 			if(!hdl.hasOwnProperty(h)) continue;
-			l = hdl[h].length;
-			for(i=0;i<l;i++) {
-				if(hdl[h] && hdl[h][i])
-					hdl[h][i].call(Crafty(+h),data);
+			
+			//loop over every handler within object
+			for(i = 0, l = hdl[h].length; i < l; i++) {
+				if(hdl[h] && hdl[h][i]) {
+					//if an entity, call with that context
+					if(entities[h]) {
+						hdl[h][i].call(Crafty(+h), data);
+					} else { //else call with Crafty context
+						hdl[h][i].call(Crafty, data);
+					}
+				}
 			}
 		}
+	},
+	
+	bind: function(event, callback) {
+		if(!handlers[event]) handlers[event] = {};
+		var hdl = handlers[event];
+		
+		if(!hdl.global) hdl.global = [];
+		return hdl.global.push(callback) - 1;
+	},
+	
+	unbind: function(event, callback) {
+		var hdl = handlers[event], h, i, l;
+		
+		//loop over every object bound
+		for(h in hdl) {
+			if(!hdl.hasOwnProperty(h)) continue;
+			
+			//if passed the ID
+			if(typeof callback === "number") {
+				delete hdl[h][callback];
+				return true;
+			}
+			
+			//loop over every handler within object
+			for(i = 0, l = hdl[h].length; i < l; i++) {
+				if(hdl[h][i] === callback) {
+					delete hdl[h][i];
+					return true;
+				}
+			}
+		}
+		
+		return false;
 	},
 	
 	frame: function() {
 		return frame;
 	},
 	
-	onload: function(ctx,fn) {
-		if(!arguments.length) {
-			var i = 0, l = onloads.length,
-				current;
-			for(;i<l;++i) {
-				current = onloads[i];
-				if(current)
-					current.fn.call(current.ctx);
-			}
-			return this;
-		}
-		onloads.push({ctx: ctx, fn: fn});
-		return this;
-	},
-	
 	components: function() {
 		return components;
-	}
+	},
+	
+	clone: clone
 });
 
 /**
@@ -434,6 +690,20 @@ function UID() {
 		return UID(); //recurse until it is unique
 	}
 	return id;
+}
+
+/**
+* Clone an Object
+*/
+function clone(obj){
+	if(obj == null || typeof(obj) != 'object')
+		return obj;
+
+	var temp = obj.constructor(); // changed
+
+	for(var key in obj)
+		temp[key] = clone(obj[key]);
+	return temp;
 }
 //make Crafty global
 window.Crafty = Crafty;
@@ -608,7 +878,6 @@ Crafty.c("2D", {
 	_entry: null,
 	_attachy: [],
 	_changed: false,
-	_offscreen: false,
 	
 	init: function() {
 		this._global = this[0];
@@ -660,6 +929,8 @@ Crafty.c("2D", {
 			if no setters, check on every frame for a difference 
 			between this._(x|y|w|h|z...) and this.(x|y|w|h|z)
 			*/
+			
+			//set the public properties to the current private properties
 			this.x = this._x;
 			this.y = this._y;
 			this.w = this._w;
@@ -669,28 +940,36 @@ Crafty.c("2D", {
 			this.alpha = this._alpha;
 			this.visible = this._visible;
 			
+			//on every frame check for a difference in any property
 			this.bind("enterframe", function() {
-				//if there are differences
+				//if there are differences between the public and private properties
 				if(this.x !== this._x || this.y !== this._y ||
 				   this.w !== this._w || this.h !== this._h ||
 				   this.z !== this._z || this.rotation !== this._rotation ||
 				   this.alpha !== this._alpha || this.visible !== this._visible) {
 					
+					//save the old positions
 					var old = this.mbr() || this.pos();
 					
+					//if rotation has changed, use the private rotate method
 					if(this.rotation !== this._rotation) {
 						this._rotate(this.rotation);
 					} else {
-						var mbr = this._mbr;
+						//update the MBR
+						var mbr = this._mbr, moved = false;
 						if(mbr) { //check each value to see which has changed
-							if(this.x !== this._x) { mbr._x -= this.x - this._x; }
-							else if(this.y !== this._y) { mbr._y -= this.y - this._y; }
-							else if(this.w !== this._w) { mbr._w -= this.w - this._w; }
-							else if(this.h !== this._h) { mbr._h -= this.h - this._h; }
-							else if(this.z !== this._z) { mbr._z -= this.z - this._z; }
+							if(this.x !== this._x) { mbr._x -= this.x - this._x; moved = true; }
+							else if(this.y !== this._y) { mbr._y -= this.y - this._y; moved = true; }
+							else if(this.w !== this._w) { mbr._w -= this.w - this._w; moved = true; }
+							else if(this.h !== this._h) { mbr._h -= this.h - this._h; moved = true; }
+							else if(this.z !== this._z) { mbr._z -= this.z - this._z; moved = true; }
 						}
+						
+						//if the moved flag is true, trigger a move
+						if(moved) this.trigger("move", old);
 					}
 					
+					//set the public properties to the private properties
 					this._x = this.x;
 					this._y = this.y;
 					this._w = this.w;
@@ -700,7 +979,7 @@ Crafty.c("2D", {
 					this._alpha = this.alpha;
 					this._visible = this.visible;
 					
-					this.trigger("move", old);
+					//trigger the changes
 					this.trigger("change", old);
 				}
 			});
@@ -708,32 +987,11 @@ Crafty.c("2D", {
 		
 		//insert self into the HashMap
 		this._entry = Crafty.map.insert(this);
-		Crafty.DrawList.add(this);
 		
 		//when object changes, update HashMap
 		this.bind("move", function() {
 			var area = this._mbr || this;
 			this._entry.update(area);
-			
-			//if completely offscreen, remove from drawlist
-			if(this._x + this._w < 0 - this.buffer && 
-			   this._y + this._h < 0 - this.buffer && 
-			   this._x > Crafty.viewport.width + this.buffer && 
-			   this._y > Crafty.viewport.height + this.buffer) {
-			   
-				Crafty.DrawList.remove(this);
-				this._offscreen = true;
-			}
-			
-			//if within screen, add to list
-			if(this._offscreen && (this._x + this._w > 0 - this.buffer && 
-			   this._y + this._h > 0 - this.buffer && 
-			   this._x < Crafty.viewport.width + this.buffer && 
-			   this._y < Crafty.viewport.height + this.buffer)) {
-				
-				Crafty.DrawList.add(this);
-				this._offscreen = false;
-			}
 		});
 		
 		this.bind("rotate", function(e) {
@@ -744,15 +1002,16 @@ Crafty.c("2D", {
 		//when object is removed, remove from HashMap
 		this.bind("remove", function() {
 			Crafty.map.remove(this);
-			Crafty.DrawList.remove(this);
+			
 			this.detach();
-		});
-		
-		this.bind("change", function() {
-			Crafty.DrawList.change = true;
 		});
 	},
 	
+	/**
+	* Calculates the MBR when rotated with an origin point
+	*
+	* @private
+	*/
 	_rotate: function(v) {
 		var theta = -1 * (v % 360), //angle always between 0 and 359
 			rad = theta * DEG_TO_RAD,
@@ -785,15 +1044,31 @@ Crafty.c("2D", {
 		//trigger rotation event
 		var difference = this._rotation - v,
 			drad = difference * DEG_TO_RAD;
-		this.trigger("rotate", {cos: Math.cos(drad), sin: Math.sin(drad), deg: difference, rad: drad, o: {x: o.x, y: o.y}});
+			
+		this.trigger("rotate", {
+			cos: Math.cos(drad), 
+			sin: Math.sin(drad), 
+			deg: difference, 
+			rad: drad, 
+			o: {x: o.x, y: o.y},
+			matrix: {M11: ct, M12: st, M21: -st, M22: ct}
+		});
 	},
 	
+	/**
+	* Calculates the area of the entity
+	*/
 	area: function() {
 		return this._w * this._h;
 	},
 	
 	/**
-	* Does a rect intersect this
+	* Checks if this entity intersects a rect
+	*
+	* @param x X position of the rect or a Rect object
+	* @param y Y position of the rect
+	* @param w Width of the rect
+	* @param h Height of the rect
 	*/
 	intersect: function(x,y,w,h) {
 		var rect, obj = this._mbr || this;
@@ -807,6 +1082,14 @@ Crafty.c("2D", {
 			   obj._y < rect.y + rect.h && obj._h + obj._y > rect.y;
 	},
 	
+	/**
+	* Checks if the entity is within a rect
+	*
+	* @param x X position of the rect or a Rect object
+	* @param y Y position of the rect
+	* @param w Width of the rect
+	* @param h Height of the rect
+	*/
 	within: function(x,y,w,h) {
 		var rect;
 		if(typeof x === "object") {
@@ -815,27 +1098,74 @@ Crafty.c("2D", {
 			rect = {x: x, y: y, w: w, h: h};
 		}
 		
-		return rect.x >= this.x && rect.x + rect.w <= this.x + this.w &&
-			   rect.y >= this.y && rect.y + rect.h <= this.y + this.h;
+		return rect.x <= this.x && rect.x + rect.w >= this.x + this.w &&
+				rect.y <= this.y && rect.y + rect.h >= this.y + this.h;
 	},
 	
+	/**
+	* Checks if the entity contains a rect
+	*
+	* @param x X position of the rect or a Rect object
+	* @param y Y position of the rect
+	* @param w Width of the rect
+	* @param h Height of the rect
+	*/
+	contains: function(x,y,w,h) {
+		var rect;
+		if(typeof x === "object") {
+			rect = x;
+		} else {
+			rect = {x: x, y: y, w: w, h: h};
+		}
+		
+		return rect.x >= this.x && rect.x + rect.w <= this.x + this.w &&
+				rect.y >= this.y && rect.y + rect.h <= this.y + this.h;
+	},
+	
+	/**
+	* Returns an object containing the x and y position
+	* as well as width and height as w and h.
+	*/
 	pos: function() {
 		return {
-			_x: Math.floor(this._x),
-			_y: Math.floor(this._y),
-			_w: Math.floor(this._w),
-			_h: Math.floor(this._h)
+			_x: (this._x),
+			_y: (this._y),
+			_w: (this._w),
+			_h: (this._h)
 		};
 	},
 	
 	/**
-	* Is object at point
+	* Returns the minimum bounding rectangle. If there is no rotation
+	* on the entity it will return the rect.
+	*/
+	mbr: function() {
+		if(!this._mbr) return this.pos();
+		return {
+			_x: (this._mbr._x),
+			_y: (this._mbr._y),
+			_w: (this._mbr._w),
+			_h: (this._mbr._h)
+		};
+	},
+	
+	/**
+	* Is a point within an entity
+	*
+	* @param x X position of the point
+	* @param y Y position of the point
 	*/
 	isAt: function(x,y) {
 		return this.x <= x && this.x + this.w >= x &&
 			   this.y <= y && this.y + this.h >= y;
 	},
 	
+	/**
+	* Move an object by direction in terms of n,s,e,w or a combination
+	*
+	* @param dir Direction to move (n,s,e,w,ne,nw,se,sw)
+	* @param by Amount to move in the specified direction
+	*/
 	move: function(dir, by) {
 		if(dir.charAt(0) === 'n') this.y -= by;
 		if(dir.charAt(0) === 's') this.y += by;
@@ -845,6 +1175,15 @@ Crafty.c("2D", {
 		return this;
 	},
 	
+	/**
+	* Shift or move the entity by an amount. Use negative values
+	* for an opposite direction.
+	*
+	* @param x Amount to move X by. 
+	* @param y Amount to move Y
+	* @param w Amount to widen
+	* @param h Amount to increase height
+	*/
 	shift: function(x,y,w,h) {
 		//shift by amount
 		if(x) this.x += x;
@@ -855,6 +1194,12 @@ Crafty.c("2D", {
 		return this;
 	},
 	
+	/**
+	* Attach an entity to replicate any movement or rotation
+	* of this entity
+	*
+	* @param obj Entity to attach
+	*/
 	attach: function(obj) {
 		function callback(e) {
 			if(!e) return; //no change in position
@@ -883,6 +1228,11 @@ Crafty.c("2D", {
 		return this;
 	},
 	
+	/**
+	* Detach an object from following
+	*
+	* @param obj The entity to detach. Left blank will remove all attached entities
+	*/
 	detach: function(obj) {
 		//if nothing passed, remove all attached objects
 		if(!obj) {
@@ -906,6 +1256,13 @@ Crafty.c("2D", {
 		return this;
 	},
 	
+	/**
+	* Set the origin point of an entity for it to rotate around
+	*
+	* @param x Pixel value or string based representation with combination of 
+	*		   center, bottom, middle, left and right
+	* @param y Pixel value of origin offset on the Y axis
+	*/
 	origin: function(x,y) {
 		//text based origin
 		if(typeof x === "string") {
@@ -932,40 +1289,42 @@ Crafty.c("2D", {
 		return this;
 	},
 	
-	mbr: function() {
-		var mbr = this._mbr;
-		if(!mbr) return;
-		return {
-			_x: mbr._x,
-			_y: mbr._y,
-			_w: mbr._w,
-			_h: mbr._h
-		};
-	},
-	
+	/**
+	* Method for rotation rather than through a setter
+	*
+	* @param e Rotation event data
+	*/
 	rotate: function(e) {
+		//assume event data origin
 		this._origin.x = e.o.x - this._x;
 		this._origin.y = e.o.y - this._y;
 		
+		//modify through the setter method
 		this._attr('_rotation', e.theta);
 	},
 	
+	/**
+	* Setter method for all 2D properties including 
+	* x, y, w, h, alpha, rotation and visible.
+	*
+	* @private
+	* @param name Name of property
+	* @param value Value of property
+	*/
 	_attr: function(name,value) {	
+		//keep a reference of the old positions
 		var pos = this.pos(),
 			old = this.mbr() || pos;
 		
+		//if rotation, use the rotate method
 		if(name === '_rotation') {
 			this._rotate(value);
+		//set the global Z and trigger reorder just incase
 		} else if(name === '_z') {
 			this._global = parseInt(value + Crafty.zeroFill(this[0], 5), 10); //magic number 10e5 is the max num of entities
 			this.trigger("reorder");
-		} else if(name === '_visible') {
-			if(value === false) {
-				Crafty.DrawList.remove(this);
-			} else if(value === true) {
-				Crafty.DrawList.add(this);
-			}
-		} else if(name !== '_alpha') {
+		//if the rect bounds change, update the MBR and trigger move
+		} else if(name == '_x' || name === '_y' || name === '_w' || name === '_h') {
 			var mbr = this._mbr;
 			if(mbr) {
 				mbr[name] -= this[name] - value;
@@ -974,14 +1333,15 @@ Crafty.c("2D", {
 			this.trigger("move", old);
 		}
 		
+		//everything will assume the value
 		this[name] = value;
 		
-		
+		//trigger a change
 		this.trigger("change", old);
 	}
 });
 
-Crafty.c("gravity", {
+Crafty.c("Gravity", {
 	_gravity: 0.2,
 	_gy: 0,
 	_falling: true,
@@ -1008,27 +1368,43 @@ Crafty.c("gravity", {
 			this._gy = 0; //reset change in y
 		}
 
-		var obj = this, hit = false;
-		Crafty(this._anti).each(function() {
+		var obj, hit = false, pos = this.pos(),
+			q, i = 0, l;
+
+		//Increase by 1 to make sure map.search() finds the floor
+		pos._y++;
+
+		//map.search wants _x and intersect wants x...
+		pos.x = pos._x;
+		pos.y = pos._y;
+		pos.w = pos._w;
+		pos.h = pos._h;
+
+		q = Crafty.map.search(pos);
+		l = q.length;
+
+		for(;i<l;++i) {
+			obj = q[i];
 			//check for an intersection directly below the player
-			if(this.intersect(obj.x,obj.y+1,obj.w,obj.h) && obj !== this) {
-				hit = this;
+			if(obj !== this && obj.has(this._anti) && obj.intersect(pos)) {
+				hit = obj;
+				break;
 			}
-		});
+		}
 
 		if(hit) { //stop falling if found
 			if(this._falling) this.stopFalling(hit);
-		} else {
+		} else { 	
 			this._falling = true; //keep falling otherwise
 		}
 	},
 
 	stopFalling: function(e) {
-		if(e) this.y = e.y - this.h ; //move object
+		if(e) this.y = e._y - this._h ; //move object
 
 		//this._gy = -1 * this._bounce;
 		this._falling = false;
-		if(this.__move && this.__move.up) this.__move.up = false;
+		if(this._up) this._up = false;
 		this.trigger("hit");
 	},
 
@@ -1097,8 +1473,17 @@ Crafty.polygon.prototype = {
 	}
 };
 
-Crafty.c("collision", {
+/**@
+* #Collision
+* @category Collision
+* Component to detect collision between any two convex polygons.
+*/
+Crafty.c("Collision", {
 	
+    init: function() {
+        this.requires("2D");
+    },
+    
 	collision: function(poly) {
 		var area = this._mbr || this;
 		
@@ -1113,6 +1498,15 @@ Crafty.c("collision", {
 		return this;
 	},
 	
+	/**@
+	* #.hit
+	* @comp Collision
+	* @sign public Boolean/Array hit(String component)
+	* @param component - Collide with entities that has this component
+	* @return `false` if no collision. If a collision is detected, 
+	* returns an Array of objects that are colliding.
+	* @see .onHit
+	*/
 	hit: function(comp) {
 		var area = this._mbr || this,
 			results = Crafty.map.search(area, false),
@@ -1144,7 +1538,7 @@ Crafty.c("collision", {
 			obj = dupes[key];
 
 			if(hasMap && 'map' in obj) {
-				var SAT = this.SAT(this.map, obj.map);
+				var SAT = this._SAT(this.map, obj.map);
 				SAT.obj = obj;
 				SAT.type = "SAT";
 				if(SAT) finalresult.push(SAT);
@@ -1160,17 +1554,24 @@ Crafty.c("collision", {
 		return finalresult;
 	},
 	
-	onhit: function(comp, fn) {
+	onHit: function(comp, fn, fnOff) {
+		var justHit = false;
 		this.bind("enterframe", function() {
 			var hitdata = this.hit(comp);
 			if(hitdata) {
+				justHit = true;
 				fn.call(this, hitdata);
+			} else if(justHit) {
+				if (typeof fnOff == 'function') {
+					fnOff.call(this);
+				}
+				justHit = false;
 			}
 		});
 		return this;
 	},
 	
-	SAT: function(poly1, poly2) {
+	_SAT: function(poly1, poly2) {
 		var points1 = poly1.points,
 			points2 = poly2.points,
 			i = 0, l = points1.length,
@@ -1275,67 +1676,128 @@ Crafty.c("collision", {
 
 Crafty.c("DOM", {
 	_element: null,
+	_filters: {},
 	
 	init: function() {
 		this._element = document.createElement("div");
-		Crafty.stage.elem.appendChild(this._element);
+		Crafty.stage.inner.appendChild(this._element);
 		this._element.style.position = "absolute";
 		this._element.id = "ent" + this[0];
+		
+		this.bind("change", function() {
+			if(!this._changed) {
+				this._changed = true;
+				Crafty.DrawManager.add(this);
+			}
+		});
+		
+		if(Crafty.support.prefix === "ms" && Crafty.support.version < 9) {
+			this.bind("rotate", function(e) {
+				var m = e.matrix,
+					elem = this._element.style,
+					M11 = m.M11.toFixed(8),
+					M12 = m.M12.toFixed(8),
+					M21 = m.M21.toFixed(8),
+					M22 = m.M22.toFixed(8);
+				
+				
+				this._filters.rotation = "progid:DXImageTransform.Microsoft.Matrix(M11="+M11+", M12="+M12+", M21="+M21+", M22="+M22+", sizingMethod='auto expand')";
+			});
+		}
 		
 		this.bind("remove", this.undraw);
 	},
 	
 	DOM: function(elem) {
-		if(!this.has("2D")) this.addComponent("2D");
-		this._element = elem;
-		this._element.style.position = 'absolute';
+		if(elem && elem.nodeType) {
+			this.undraw();
+			this._element = elem;
+			this._element.style.position = 'absolute';
+		}
 		return this;
 	},
 	
 	draw: function() {
-		var style = this._element.style, co;
-		style.top = Math.floor(this._y) + "px";
-		style.left = Math.floor(this._x) + "px";
-		style.width = Math.floor(this._w) + "px";
-		style.height = Math.floor(this._h) + "px";
+		var style = this._element.style,
+			coord = this.__coord || [0,0,0,0],
+			co = {x: coord[0], y: coord[1] },
+			prefix = Crafty.support.prefix;
+			
+		style.top = ~~(this._y) + "px";
+		style.left = ~~(this._x) + "px";
+		style.width = ~~(this._w) + "px";
+		style.height = ~~(this._h) + "px";
 		style.zIndex = this._z;
+		
 		style.opacity = this._alpha;
+		style[prefix+"Opacity"] = this._alpha;
+		
+		//if not version 9 of IE
+		if(Crafty.support.prefix === "ms" && Crafty.support.version < 9) {
+			//for IE version 8, use ImageTransform filter
+			if(Crafty.support.version === 8) {
+				this._filters.alpha = "progid:DXImageTransform.Microsoft.Alpha(Opacity="+(this._alpha * 100)+")"; // first!
+			//all other versions use filter
+			} else {
+				this._filters.alpha = "alpha(opacity="+(this._alpha*100)+")";
+			}
+			this.applyFilters();
+		}
 		
 		if(this._mbr) {
 			var rstring = "rotate("+this._rotation+"deg)",
 				origin = this._origin.x + "px " + this._origin.y + "px";
 			
 			style.transformOrigin = origin;
-			style.mozTransformOrigin = origin;
-			style.webkitTransformOrigin = origin;
-			style.oTransformOrigin = origin;
+			style[prefix+"TransformOrigin"] = origin;
 			
 			style.transform = rstring;
-			style.mozTransform = rstring;
-			style.webkitTransform = rstring;
-			style.oTransform = rstring;
+			style[prefix+"Transform"] = rstring;
 		}
 		
-		this.trigger("draw", {style: style, type: "DOM"});
+		this.trigger("draw", {style: style, type: "DOM", co: co});
 		
-		if(this.has("sprite")) {
-			co = this.__coord;
-			style.background = "url('" + this.__image + "') no-repeat -" + co[0] + "px -" + co[1] + "px";
-		}
 		return this;
+	},
+	
+	applyFilters: function() {
+		this._element.style.filter = "";
+		for(var filter in this._filters) {
+			if(!this._filters.hasOwnProperty(filter)) continue;
+			this._element.style.filter += this._filters[filter] + " ";
+		}
 	},
 	
 	undraw: function() {
-		Crafty.stage.elem.removeChild(this._element);
+		Crafty.stage.inner.removeChild(this._element);
 		return this;
 	},
 	
-	css: function(obj) {
-		var key, elem = this._element, style = elem.style;
-		for(key in obj) {
-			if(!obj.hasOwnProperty(key)) continue;
-			style[key] = obj[key];
+	css: function(obj, value) {
+		var key,
+			elem = this._element, 
+			val,
+			style = elem.style;
+		
+		//if an object passed
+		if(typeof obj === "object") {
+			for(key in obj) {
+				if(!obj.hasOwnProperty(key)) continue;
+				val = obj[key];
+				if(typeof val === "number") val += 'px';
+				
+				style[Crafty.camelize(key)] = val;
+			}
+		} else {
+			//if a value is passed, set the property
+			if(value) {
+				if(typeof value === "number") value += 'px';
+				style[Crafty.camelize(obj)] = value;
+			} else { //otherwise return the computed property
+				return Crafty.getStyle(elem, obj);
+			}
 		}
+		
 		this.trigger("change");
 		
 		return this;
@@ -1389,10 +1851,26 @@ Crafty.extend({
 	getStyle: function(obj,prop) {
 		var result;
 		if(obj.currentStyle)
-			result = obj.currentStyle[prop];
+			result = obj.currentStyle[Crafty.camelize(prop)];
 		else if(window.getComputedStyle)
-			result = document.defaultView.getComputedStyle(obj,null).getPropertyValue(prop);
+			result = document.defaultView.getComputedStyle(obj,null).getPropertyValue(Crafty.csselize(prop));
 		return result;
+	},
+	
+	/**
+	* Used in the Zepto framework
+	*
+	* Converts CSS notation to JS notation
+	*/
+	camelize: function(str) { 
+		return str.replace(/-+(.)?/g, function(match, chr){ return chr ? chr.toUpperCase() : '' });
+	},
+	
+	/**
+	* Converts JS notation to CSS notation
+	*/
+	csselize: function(str) {
+		return str.replace(/[A-Z]/g, function(chr){ return chr ? '-' + chr.toLowerCase() : '' });
 	}
 });
 
@@ -1461,26 +1939,72 @@ Crafty.extend({
 				__coord: [x,y,w,h],
 				__tile: tile,
 				__padding: [paddingX, paddingY],
+				__trim: null,
 				img: img,
 				ready: false,
 				
 				init: function() {
-					this.addComponent("sprite");
-					
-					if(this.has("canvas")) {
-						//draw now
-						if(this.img.complete && this.img.width > 0) {
-							this.ready = true;
-							this.trigger("change");
-						}
+					this.addComponent("Sprite");
+					this.__trim = [0,0,0,0];
+		
+					//draw now
+					if(this.img.complete && this.img.width > 0) {
+						this.ready = true;
+						this.trigger("change");
 					}
+
+					//set the width and height to the sprite size
 					this.w = this.__coord[2];
 					this.h = this.__coord[3];
+					
+					this.bind("draw", function(e) {
+						var co = e.co,
+							pos = e.pos,
+							context = e.ctx;
+							
+						if(e.type === "canvas") {
+							//draw the image on the canvas element
+							context.drawImage(this.img, //image element
+											 co.x, //x position on sprite
+											 co.y, //y position on sprite
+											 co.w, //width on sprite
+											 co.h, //height on sprite
+											 pos._x, //x position on canvas
+											 pos._y, //y position on canvas
+											 pos._w, //width on canvas
+											 pos._h //height on canvas
+							);
+						} else if(e.type === "DOM") {
+							this._element.style.background = "url('" + this.__image + "') no-repeat -" + co.x + "px -" + co.y + "px";
+						}
+					});
 				},
 				
 				sprite: function(x,y,w,h) {
-					this.__coord = [x*this.__tile+this.__padding[0],y*this.__tile+this.__padding[1],w*this.__tile || this.__tile,h*this.__tile || this.__tile];
+					this.__coord = [x * this.__tile + this.__padding[0] + this.__trim[0],
+									y * this.__tile + this.__padding[1] + this.__trim[1],
+									this.__trim[2] || w * this.__tile || this.__tile,
+									this.__trim[3] || h * this.__tile || this.__tile];
 					this.trigger("change");
+				},
+				
+				crop: function(x,y,w,h) {
+					var old = this._mbr || this.pos();
+					this.__trim = [];
+					this.__trim[0] = x;
+					this.__trim[1] = y;
+					this.__trim[2] = w;
+					this.__trim[3] = h;
+					
+					this.__coord[0] += x;
+					this.__coord[1] += y;
+					this.__coord[2] = w;
+					this.__coord[3] = h;
+					this._w = w;
+					this._h = h;
+					
+					this.trigger("change", old);
+					return this;
 				}
 			});
 		}
@@ -1489,7 +2013,7 @@ Crafty.extend({
 	},
 	
 	_events: {},
-	
+
 	/**
 	* Window Events credited to John Resig
 	* http://ejohn.org/projects/flexible-javascript-events
@@ -1500,34 +2024,37 @@ Crafty.extend({
 			type = obj;
 			obj = window.document;
 		}
-		
+
 		//save anonymous function to be able to remove
-		var afn = function(e) { var e = e || window.event; fn.call(ctx,e) };
-		if(!this._events[obj+type+fn]) this._events[obj+type+fn] = afn;
+		var afn = function(e) { var e = e || window.event; fn.call(ctx,e) },
+			id = ctx[0] || "";
+
+		if(!this._events[id+obj+type+fn]) this._events[id+obj+type+fn] = afn;
 		else return;
-		
+
 		if (obj.attachEvent) { //IE
 			obj.attachEvent('on'+type, afn);
 		} else { //Everyone else
 			obj.addEventListener(type, afn, false);
 		}
 	},
-	
+
 	removeEvent: function(ctx, obj, type, fn) {
 		if(arguments.length === 3) {
 			fn = type;
 			type = obj;
 			obj = window.document;
 		}
-		
+
 		//retrieve anonymouse function
-		var afn = this._events[obj+type+fn];
+		var id = ctx[0] || "",
+			afn = this._events[id+obj+type+fn];
 
 		if(afn) {
 			if (obj.detachEvent) {
 				obj.detachEvent('on'+type, afn);
 			} else obj.removeEventListener(type, afn, false);
-			delete this._events[obj+type+fn];
+			delete this._events[id+obj+type+fn];
 		}
 	},
 	
@@ -1542,55 +2069,32 @@ Crafty.extend({
 		_y: 0,
 		
 		scroll: function(axis, v) {
-			var old = this[axis];
+			v = Math.floor(v);
+			var change = (v - this[axis]), //change in direction
+				context = Crafty.context,
+				style = Crafty.stage.inner.style,
+				canvas;
 			
-			Crafty("2D obj").each(function() {
-				var oldposition = this.pos();
-				
-				this[axis] -= old - v;
-				//if no setter available
-				if(Crafty.support.setter === false) {
-					this[axis.substr(1)] = this[axis]; 
-				}
-				this.trigger("move",oldposition);
-			});
-			Crafty.DrawList.change = true;
-
+			//update viewport and DOM scroll
 			this[axis] = v;
+			if(axis == '_x') {
+				if(context) context.translate(change, 0);
+			} else {
+				if(context) context.translate(0, change);
+			}
+			if(context) Crafty.DrawManager.drawAll();
+			style[axis == '_x' ? "left" : "top"] = ~~v + "px";
 		},
 		
 		rect: function() {
-			return {_x: this._x, _y: this._y, _w: this.width, _h: this.height};
+			return {_x: -this._x, _y: -this._y, _w: this.width, _h: this.height};
 		},
 		
 		init: function(w,h) {
 			Crafty.window.init();
 			this.width = w || Crafty.window.width;
 			this.height = h || Crafty.window.height;
-			
-			//stop scrollbars
-			if(!w && !h) {
-				document.body.style.overflow = "hidden";
-			}
-			
-			Crafty.addEvent(this, window, "resize", function() {
-				Crafty.window.init();
-				var w, h, offset;
-				this.width = w = Crafty.window.width;
-				this.height = h = Crafty.window.height;
 				
-				Crafty.stage.elem.style.width = w;
-				Crafty.stage.elem.style.width = h;
-				if(Crafty._canvas) {
-					Crafty._canvas.width = w;
-					Crafty._canvas.height = h;
-				}
-				
-				offset = Crafty.inner(Crafty.stage.elem);
-				Crafty.stage.x = offset.x;
-				Crafty.stage.y = offset.y;
-			});
-			
 			//check if stage exists
 			var crstage = document.getElementById("cr-stage");
 			
@@ -1598,8 +2102,53 @@ Crafty.extend({
 			Crafty.stage = {
 				x: 0,
 				y: 0,
-				elem: (crstage ? crstage : document.createElement("div"))
+				fullscreen: false,
+				elem: (crstage ? crstage : document.createElement("div")),
+				inner: document.createElement("div")
 			};
+			
+			//fullscreen, stop scrollbars
+			if(!w && !h) {
+				document.body.style.overflow = "hidden";
+				Crafty.stage.fullscreen = true;
+			}
+			
+			Crafty.addEvent(this, window, "resize", function() {
+				Crafty.window.init();
+				var w = Crafty.window.width;
+					h = Crafty.window.height,
+					offset;
+				
+				
+				if(Crafty.stage.fullscreen) {
+					this.width = w;
+					this.height = h;
+					Crafty.stage.elem.style.width = w;
+					Crafty.stage.elem.style.width = h;
+					
+					if(Crafty._canvas) {
+						Crafty._canvas.width = w;
+						Crafty._canvas.height = h;
+						Crafty.DrawManager.drawAll();
+					}
+				}
+				
+				offset = Crafty.inner(Crafty.stage.elem);
+				Crafty.stage.x = offset.x;
+				Crafty.stage.y = offset.y;
+			});
+			
+			Crafty.addEvent(this, window, "blur", function() {
+				if (!Crafty.dontPauseOnBlur) {
+					Crafty.pause();
+				}
+			});
+			Crafty.addEvent(this, window, "focus", function() {
+				if(Crafty._paused && !Crafty.dontPauseOnBlur) {
+					Crafty.pause();
+				}
+			});
+
 			
 			//add to the body and give it an ID if not exists
 			if(!crstage) {
@@ -1609,6 +2158,9 @@ Crafty.extend({
 			
 			var elem = Crafty.stage.elem.style,
 				offset;
+			
+			Crafty.stage.elem.appendChild(Crafty.stage.inner);
+			Crafty.stage.inner.style.position = "absolute";
 			
 			//css style
 			elem.width = this.width + "px";
@@ -1621,14 +2173,14 @@ Crafty.extend({
 			Crafty.stage.x = offset.x;
 			Crafty.stage.y = offset.y;
 			
-			if('__defineSetter__' in this && '__defineGetter__' in this) {
+			if(Crafty.support.setter) {
 				//define getters and setters to scroll the viewport
 				this.__defineSetter__('x', function(v) { this.scroll('_x', v); });
 				this.__defineSetter__('y', function(v) { this.scroll('_y', v); });
 				this.__defineGetter__('x', function() { return this._x; });
 				this.__defineGetter__('y', function() { return this._y; });
 			//IE9
-			} else if('defineProperty' in Object) {
+			} else if(Crafty.support.defineProperty) {
 				Object.defineProperty(this, 'x', {set: function(v) { this.scroll('_x', v); }, get: function() { return this._x; }});
 				Object.defineProperty(this, 'y', {set: function(v) { this.scroll('_y', v); }, get: function() { return this._y; }});
 			} else {
@@ -1645,17 +2197,130 @@ Crafty.extend({
 	/**
 	* Map key names to key codes
 	*/
-	keys: {'BSP':8, 'TAB':9, 'ENT':13, 'SHF':16, 'CTR':17, 'ALT':18, 'PAU':19, 'CAP':20, 'ESC':27, 'SP':32, 'PGU':33, 'PGD':34, 'END':35, 'HOM':36, 'LA':37, 'UA':38, 'RA':39, 'DA':40, 'INS':45, 'DEL':46, 'D0':48, 'D1':49, 'D2':50, 'D3':51, 'D4':52, 'D5':53, 'D6':54, 'D7':55, 'D8':56, 'D9':57, 'SEM':59, 'EQL':61, 'A':65, 'B':66, 'C':67, 'D':68, 'E':69, 'F':70, 'G':71, 'H':72, 'I':73, 'J':74, 'K':75, 'L':76, 'M':77, 'N':78, 'O':79, 'P':80, 'Q':81, 'R':82, 'S':83, 'T':84, 'U':85, 'V':86, 'W':87, 'X':88, 'Y':89, 'Z':90, 'LWN':91, 'RWN':92, 'SEL':93, 'N0':96, 'N1':97, 'N2':98, 'N3':99, 'N4':100, 'N5':101, 'N6':102, 'N7':103, 'N8':104, 'N9':105, 'MUL':106, 'ADD':107, 'SUB':109, 'DEC':110, 'DIV':111, 'F1':112, 'F2':113, 'F3':114, 'F4':115, 'F5':116, 'F6':117, 'F7':118, 'F8':119, 'F9':120, 'F10':121, 'F11':122, 'F12':123, 'NUM':144, 'SCR':145, 'COM':188, 'PER':190, 'FSL':191, 'ACC':192, 'OBR':219, 'BSL':220, 'CBR':221, 'QOT':222}
+	keys: {
+		'BACKSPACE': 8,
+        'TAB': 9,
+        'ENTER': 13,
+        'PAUSE': 19,
+        'CAPS': 20,
+        'ESC': 27,
+        'SPACE': 32,
+        'PAGE_UP': 33,
+        'PAGE_DOWN': 34,
+        'END': 35,
+        'HOME': 36,
+        'LEFT_ARROW': 37,
+        'UP_ARROW': 38,
+        'RIGHT_ARROW': 39,
+        'DOWN_ARROW': 40,
+        'INSERT': 45,
+        'DELETE': 46,
+        '0': 48,
+        '1': 49,
+        '2': 50,
+        '3': 51,
+        '4': 52,
+        '5': 53,
+        '6': 54,
+        '7': 55,
+        '8': 56,
+        '9': 57,
+        'A': 65,
+        'B': 66,
+        'C': 67,
+        'D': 68,
+        'E': 69,
+        'F': 70,
+        'G': 71,
+        'H': 72,
+        'I': 73,
+        'J': 74,
+        'K': 75,
+        'L': 76,
+        'M': 77,
+        'N': 78,
+        'O': 79,
+        'P': 80,
+        'Q': 81,
+        'R': 82,
+        'S': 83,
+        'T': 84,
+        'U': 85,
+        'V': 86,
+        'W': 87,
+        'X': 88,
+        'Y': 89,
+        'Z': 90,
+        'NUMPAD_0': 96,
+        'NUMPAD_1': 97,
+        'NUMPAD_2': 98,
+        'NUMPAD_3': 99,
+        'NUMPAD_4': 100,
+        'NUMPAD_5': 101,
+        'NUMPAD_6': 102,
+        'NUMPAD_7': 103,
+        'NUMPAD_8': 104,
+        'NUMPAD_9': 105,
+        'MULTIPLY': 106,
+        'ADD': 107,
+        'SUBSTRACT': 109,
+        'DECIMAL': 110,
+        'DIVIDE': 111,
+        'F1': 112,
+        'F2': 113,
+        'F3': 114,
+        'F4': 115,
+        'F5': 116,
+        'F6': 117,
+        'F7': 118,
+        'F8': 119,
+        'F9': 120,
+        'F10': 121,
+        'F11': 122,
+        'F12': 123,
+        'SHIFT': 16,
+        'CTRL': 17,
+        'ALT': 18,
+        'PLUS': 187,
+        'COMMA': 188,
+        'MINUS': 189,
+        'PERIOD': 190 
+	}
 });
 
 /**
 * Test support for various javascript and HTML features
 */
-Crafty.onload(this, function() {
-	Crafty.support.setter = ('__defineSetter__' in this && '__defineGetter__' in this);
-	Crafty.support.defineProperty = ('defineProperty' in Object);
-	Crafty.support.audio = ('Audio' in window);
-});
+(function testSupport() {
+	var support = Crafty.support,
+		ua = navigator.userAgent.toLowerCase(),
+		match = /(webkit)[ \/]([\w.]+)/.exec(ua) || 
+				/(o)pera(?:.*version)?[ \/]([\w.]+)/.exec(ua) || 
+				/(ms)ie ([\w.]+)/.exec(ua) || 
+				/(moz)illa(?:.*? rv:([\w.]+))?/.exec(ua) || [];
+	
+	//start tests
+	support.setter = ('__defineSetter__' in this && '__defineGetter__' in this);
+	support.defineProperty = (function() {
+		if(!'defineProperty' in Object) return false;
+		try { Object.defineProperty({},'x',{}); }
+		catch(e) { return false };
+		return true;
+	})();
+	support.audio = ('Audio' in window);
+	
+	support.prefix = (match[1] || match[0]);
+	//browser specific quirks
+	if(support.prefix === "moz") support.prefix = "Moz";
+	
+	//record the version name an integer
+	if(match[2]) {
+		support.versionName = match[2];
+		support.version = +(match[2].split("."))[0];
+	}
+	
+	support.canvas = ('getContext' in document.createElement("canvas"));
+})();
 
 /**
 * Entity fixes the lack of setter support
@@ -1675,29 +2340,61 @@ Crafty.c("viewport", {
 });
 
 
-
 /**
 * Canvas Components and Extensions
 */
-Crafty.c("canvas", {
+Crafty.c("Canvas", {
 	buffer: 50,
 	
 	init: function() {
-		this.bind("reorder", function() {
-			Crafty.DrawList.resort();
+		//increment the amount of canvas objs
+		Crafty.DrawManager.total2D++;
+		
+		this.bind("change", function(e) {
+			//if within screen, add to list			
+			/**
+			* TODO:
+			* Optimize so don't redraw if rectangle is out of bounds
+			* Register but if already registered, widen RECT
+			*/
+			
+			if(this._changed === false) {
+				this._changed = Crafty.DrawManager.add(e || this, this);
+			} else {
+				if(e) this._changed = Crafty.DrawManager.add(e, this);
+			}
+		});
+		
+		this.bind("remove", function() {
+			Crafty.DrawManager.total2D--;
+			Crafty.DrawManager.add(this,this);
 		});
 	},
 	
-	draw: function() {
-		if(!this.ready) return;
+	draw: function(ctx,x,y,w,h) {
+		if(!this.ready) return; 
+		if(arguments.length === 4) {
+			h = w;
+			w = y;
+			y = x;
+			x = ctx;
+			ctx = Crafty.context;
+		}
 		
 		var pos = { //inlined pos() function, for speed
-				_x: Math.floor(this._x),
-				_y: Math.floor(this._y),
-				_w: Math.floor(this._w),
-				_h: Math.floor(this._h)
+				_x: (this._x + (x || 0)),
+				_y: (this._y + (y || 0)),
+				_w: (w || this._w),
+				_h: (h || this._h)
 			},
-			context = Crafty.context;
+			context = ctx || Crafty.context,
+			coord = this.__coord || [0,0,0,0],
+			co = {
+				x: coord[0] + (x || 0),
+				y: coord[1] + (y || 0),
+				w: w || coord[2],
+				h: h || coord[3]
+			};
 			
 		if(this._mbr) {
 			context.save();
@@ -1710,34 +2407,17 @@ Crafty.c("canvas", {
 		}
 		
 		//draw with alpha
-		if(this._alpha > 0) {
+		if(this._alpha < 1.0) {
 			var globalpha = context.globalAlpha;
 			context.globalAlpha = this._alpha;
 		}
 		
-		//inline drawing of the sprite
-		if(this.__c.sprite) {
-			var coord = this.__coord;
-			
-			//draw the image on the canvas element
-			context.drawImage(this.img, //image element
-									 coord[0], //x position on sprite
-									 coord[1], //y position on sprite
-									 coord[2], //width on sprite
-									 coord[3], //height on sprite
-									 pos._x, //x position on canvas
-									 pos._y, //y position on canvas
-									 pos._w, //width on canvas
-									 pos._h //height on canvas
-			);
-		} else {
-			this.trigger("draw", {type: "canvas", pos: pos});
-		}
+		this.trigger("draw", {type: "canvas", pos: pos, co: co, ctx: context});
 		
 		if(this._mbr) {
 			context.restore();
 		}
-		if(this._alpha > 0) {
+		if(this._alpha < 1.0) {
 			context.globalAlpha = globalpha;
 		}
 		return this;
@@ -1752,31 +2432,37 @@ Crafty.extend({
 	* Set the canvas element and 2D context
 	*/
 	canvas: function() {
-		var elem = document.createElement("canvas");
-		
-		this.stage.elem.appendChild(elem);
-		
-		//check if is an actual canvas element
-		if(!('getContext' in elem)) {
+		//check if canvas is supported
+		if(!Crafty.support.canvas) {
 			Crafty.trigger("nocanvas");
+			Crafty.stop();
 			return;
 		}
 		
-		this.context = elem.getContext('2d');
-		this._canvas = elem;
+		//create 3 empty canvas elements
+		var c;
+		c = document.createElement("canvas");
+		c.width = Crafty.viewport.width;
+		c.height = Crafty.viewport.height;
+		c.style.position = 'absolute';
+		c.style.left = "0px";
+		c.style.top = "0px";
 		
-		//set canvas and viewport to the final dimensions
-		elem.width = this.viewport.width;
-		elem.height = this.viewport.height;
-		elem.style.position = "absolute";
+		Crafty.stage.elem.appendChild(c);
+		Crafty.context = c.getContext('2d');
+		Crafty._canvas = c;
 	}
 });
 
 Crafty.extend({
 	down: null, //object mousedown, waiting for up
 	over: null, //object mouseover, waiting for out
+	mouseObjs: 0,
+	keydown: {},
 		
 	mouseDispatch: function(e) {
+		if(!Crafty.mouseObjs) return;
+
 		if(e.type === "touchstart") e.type = "mousedown";
 		else if(e.type === "touchmove") e.type = "mousemove";
 		else if(e.type === "touchend") e.type = "mouseup";
@@ -1784,19 +2470,20 @@ Crafty.extend({
 		var maxz = -1,
 			closest,
 			q,
-			i = 0, l;
+			i = 0, l,
+			x = e.clientX - Crafty.stage.x + document.body.scrollLeft + document.documentElement.scrollLeft,
+			y = e.clientY - Crafty.stage.y + document.body.scrollTop + document.documentElement.scrollTop;
 		
 		//search for all mouse entities
-		q = Crafty.map.search(Crafty.viewport.rect());
+		q = Crafty.map.search({_x: x, _y:y, _w:1, _h:1});
 		
 		for(l=q.length;i<l;++i) {
 			//check if has mouse component
-			if(!q[i].has("mouse")) continue;
+			if(!q[i].has("Mouse")) continue;
 			
 			var current = q[i],
-				flag = false,
-				x = e.clientX - Crafty.stage.x + document.body.scrollLeft + document.documentElement.scrollLeft,
-				y = e.clientY - Crafty.stage.y + document.body.scrollTop + document.documentElement.scrollTop;
+				flag = false;
+				
 			
 			if(current.map) {
 				if(current.map.containsPoint(x, y)) {
@@ -1820,6 +2507,7 @@ Crafty.extend({
 			//click must mousedown and out on tile
 			if(e.type === "mousedown") {
 				this.down = closest;
+				this.down.trigger('mousedown', e);
 			}
 			if(e.type === "mouseup") {
 				//check that down exists and this is down
@@ -1854,7 +2542,7 @@ Crafty.extend({
 });
 
 //initialize the mouse events onload
-Crafty.onload(this, function() {
+Crafty.bind("Load", function() {
 	Crafty.addEvent(this, Crafty.stage.elem, "mousedown", Crafty.mouseDispatch);
 	Crafty.addEvent(this, Crafty.stage.elem, "mouseup", Crafty.mouseDispatch);
 	Crafty.addEvent(this, Crafty.stage.elem, "mousemove", Crafty.mouseDispatch);
@@ -1864,7 +2552,14 @@ Crafty.onload(this, function() {
 	Crafty.addEvent(this, Crafty.stage.elem, "touchend", Crafty.mouseDispatch);
 });
 
-Crafty.c("mouse", {
+Crafty.c("Mouse", {
+	init: function() {
+		Crafty.mouseObjs++;
+		this.bind("remove", function() {
+			Crafty.mouseObjs--;
+		});
+	},
+	
 	areaMap: function(poly) {
 		//create polygon
 		if(arguments.length > 1) {
@@ -1881,7 +2576,7 @@ Crafty.c("mouse", {
 	}
 });
 
-Crafty.c("draggable", {
+Crafty.c("Draggable", {
 	_startX: 0,
 	_startY: 0,
 	
@@ -1910,11 +2605,23 @@ Crafty.c("draggable", {
 	}
 });
 
-Crafty.c("controls", {
+Crafty.c("Controls", {
 	init: function() {
 		function dispatch(e) {
 			e.key = e.keyCode || e.which;
+			if(e.type === "keydown") {
+				Crafty.keydown[e.key] = true;
+			} else if(e.type === "keyup") {
+				delete Crafty.keydown[e.key];
+			}
 			this.trigger(e.type, e);
+				
+			//prevent searchable keys
+			if(!(e.metaKey || e.altKey || e.ctrlKey) && !(e.key == 8 || e.key >= 112 && e.key <= 135)) {
+				if(e.preventDefault) e.preventDefault();
+				else e.returnValue = false;
+				return false;
+			}
 		}
 		
 		Crafty.addEvent(this, "keydown", dispatch);
@@ -1927,126 +2634,75 @@ Crafty.c("controls", {
 		});
 	},
 	
-	preventTypeaheadFind: function(e) {
-		if(!(e.metaKey || e.altKey || e.shiftKey || e.ctrlKey) && e.preventDefault){
-			e.preventDefault();
+	/**
+	* Check if key is down
+	*
+	* @param key Key code or string representation
+	*/
+	isDown: function(key) {
+		if(typeof key === "string") {
+			key = Crafty.keys[key];
 		}
-		return this;
- 	}
+		return !!Crafty.keydown[key];
+	}
 });
 
-Crafty.c("fourway", {
-	__move: {left: false, right: false, up: false, down: false},	
+Crafty.c("Fourway", {	
 	_speed: 3,
 	
 	init: function() {
-		if(!this.has("controls")) this.addComponent("controls");
+		this.requires("controls");
 	},
 	
 	fourway: function(speed) {
 		if(speed) this._speed = speed;
-		var move = this.__move;
 		
 		this.bind("enterframe", function() {
-			var old = this.pos(),
-				changed = false;
-			if(move.right) {
+			if (this.disableControls) return;
+			if(this.isDown("RIGHT_ARROW") || this.isDown("D")) {
 				this.x += this._speed;
-				changed = true;
 			}
-			if(move.left) {
+			if(this.isDown("LEFT_ARROW") || this.isDown("A")) {
 				this.x -= this._speed;
-				changed = true;
 			}
-			if(move.up) {
+			if(this.isDown("UP_ARROW") || this.isDown("W")) {
 				this.y -= this._speed;
-				changed = true;
 			}
-			if(move.down) {
+			if(this.isDown("DOWN_ARROW") || this.isDown("S")) {
 				this.y += this._speed;
-				changed = true;
 			}
-		}).bind("keydown", function(e) {
-			if(e.keyCode === Crafty.keys.RA || e.keyCode === Crafty.keys.D) {
-				move.right = true;
-			}
-			if(e.keyCode === Crafty.keys.LA || e.keyCode === Crafty.keys.A) {
-				move.left = true;
-			}
-			if(e.keyCode === Crafty.keys.UA || e.keyCode === Crafty.keys.W) {
-				move.up = true;
-			}
-			if(e.keyCode === Crafty.keys.DA || e.keyCode === Crafty.keys.S) {
-				move.down = true;
-			}
-			this.preventTypeaheadFind(e);
-		}).bind("keyup", function(e) {
-			if(e.keyCode === Crafty.keys.RA || e.keyCode === Crafty.keys.D) {
-				move.right = false;
-			}
-			if(e.keyCode === Crafty.keys.LA || e.keyCode === Crafty.keys.A) {
-				move.left = false;
-			}
-			if(e.keyCode === Crafty.keys.UA || e.keyCode === Crafty.keys.W) {
-				move.up = false;
-			}
-			if(e.keyCode === Crafty.keys.DA || e.keyCode === Crafty.keys.S) {
-				move.down = false;
-			}
-			this.preventTypeaheadFind(e);
 		});
 		
 		return this;
 	}
 });
 
-Crafty.c("twoway", {
-	__move: {left: false, right: false, up: false, falling: false},
+Crafty.c("Twoway", {
 	_speed: 3,
+	_up: false,
 	
 	init: function() {
-		if(!this.has("controls")) this.addComponent("controls");
+		this.requires("controls");
 	},
 	
 	twoway: function(speed,jump) {
 		if(speed) this._speed = speed;
 		jump = jump || this._speed * 2;
 		
-		var move = this.__move;
-		
 		this.bind("enterframe", function() {
-			var old = this.pos(),
-				changed = false;
-			if(move.right) {
+			if (this.disableControls) return;
+			if(this.isDown("RIGHT_ARROW") || this.isDown("D")) {
 				this.x += this._speed;
-				changed = true;
 			}
-			if(move.left) {
+			if(this.isDown("LEFT_ARROW") || this.isDown("A")) {
 				this.x -= this._speed;
-				changed = true;
 			}
-			if(move.up) {
+			if(this._up) {
 				this.y -= jump;
 				this._falling = true;
-				changed = true;
 			}
-		}).bind("keydown", function(e) {
-			if(e.keyCode === Crafty.keys.RA || e.keyCode === Crafty.keys.D) {
-				move.right = true;
-			}
-			if(e.keyCode === Crafty.keys.LA || e.keyCode === Crafty.keys.A) {
-				move.left = true;
-			}
-			if(e.keyCode === Crafty.keys.UA || e.keyCode === Crafty.keys.W) {
-				move.up = true;
-			}
-		}).bind("keyup", function(e) {
-			if(e.keyCode === Crafty.keys.RA || e.keyCode === Crafty.keys.D) {
-				move.right = false;
-			}
-			if(e.keyCode === Crafty.keys.LA || e.keyCode === Crafty.keys.A) {
-				move.left = false;
-			}
+		}).bind("keydown", function() {
+			if(this.isDown("UP_ARROW") || this.isDown("W")) this._up = true;
 		});
 		
 		return this;
@@ -2061,14 +2717,18 @@ Crafty.c("twoway", {
 * Crafty(player).animate("walk_left");
 * Crafty(player).stop();
 */
-Crafty.c("animate", {
-	_reels: {},
+Crafty.c("Animate", {
+	_reels: null,
 	_frame: null,
 	_current: null,
+	
+	init: function() {
+		this._reels = {};
+	},
 
 	animate: function(id, fromx, y, tox) {
 		//play a reel
-		if(arguments.length === 2 && typeof fromx === "number") {
+		if(arguments.length < 4 && typeof fromx === "number") {
 			//make sure not currently animating
 			this._current = id;
 			
@@ -2078,19 +2738,32 @@ Crafty.c("animate", {
 				reel: reel, //reel to play
 				frameTime: Math.ceil(duration / reel.length), //number of frames inbetween slides
 				frame: 0, //current slide/frame
-				current: 0
+				current: 0,
+				repeat: 0
 			};
-			
+			if (arguments.length === 3 && typeof y === "number") {
+				//User provided repetition count
+				if (y === -1) this._frame.repeatInfinitly = true;
+				else this._frame.repeat = y;
+			}
 			this.bind("enterframe", this.drawFrame);
 			return this;
 		}
 		if(typeof fromx === "number") {
-			var frames = tox + 1 - fromx, i = fromx,
+			var i = fromx,
 				reel = [],
 				tile = this.__tile;
-			for(;i<=tox;i++) {
-				reel.push([i * tile, y * tile]);
+				
+			if (tox > fromx) {
+				for(;i<=tox;i++) {
+					reel.push([i * tile, y * tile]);
+				}
+			} else {
+				for(;i>=tox;i--) {
+					reel.push([i * tile, y * tile]);
+				}
 			}
+			
 			this._reels[id] = reel;
 		} else if(typeof fromx === "object") {
 			this._reels[id] = fromx;
@@ -2113,8 +2786,15 @@ Crafty.c("animate", {
 		
 		if(data.frame === data.reel.length && this._frame.current === data.frameTime) {
 			data.frame = 0;
-			this.stop();
-			return;
+			if (this._frame.repeatInfinitly === true || this._frame.repeat > 0) {
+				if (this._frame.repeat) this._frame.repeat--;
+				this._frame.current = 0;
+				this._frame.frame = 0;
+			} else {
+				this.trigger("AnimationEnd", {reel: data.reel});
+				this.stop();
+				return;
+			}
 		}
 		
 		this.trigger("change");
@@ -2122,8 +2802,20 @@ Crafty.c("animate", {
 	
 	stop: function() {
 		this.unbind("enterframe", this.drawFrame);
+		this.unbind("AnimationEnd");
 		this._current = null;
 		this._frame = null;
+		
+		return this;
+	},
+	
+	reset: function() {
+		if(!this._frame) return this;
+		
+		var co = this._frame.reel[0];
+		this.__coord[0] = co[0];
+		this.__coord[1] = co[1];
+		this.stop();
 		
 		return this;
 	},
@@ -2134,7 +2826,33 @@ Crafty.c("animate", {
 	}
 });
 
-Crafty.c("color", {
+Crafty.c("Tween", {
+	tween: function(props, duration) {
+		var prop,
+			old = {},
+			step = {},
+			startFrame = Crafty.frame(),
+			endFrame = startFrame + duration;
+		
+		//store the old properties
+		for(prop in props) {
+			old[prop] = this['_'+prop];
+			step[prop] = (props[prop] - old[prop]) / duration;
+		}
+		
+		this.bind("enterframe", function d(e) {
+			if(e.frame >= endFrame) {
+				this.unbind("enterframe", d);
+				return;
+			}
+			for(prop in props) {
+				this[prop] += step[prop];
+			}
+		});
+	}
+});
+
+Crafty.c("Color", {
 	_color: "",
 	ready: true,
 	
@@ -2144,8 +2862,8 @@ Crafty.c("color", {
 				e.style.background = this._color;
 				e.style.lineHeight = 0;
 			} else if(e.type === "canvas") {
-				if(this._color) Crafty.context.fillStyle = this._color;
-				Crafty.context.fillRect(e.pos._x,e.pos._y,e.pos._w,e.pos._h);
+				if(this._color) e.ctx.fillStyle = this._color;
+				e.ctx.fillRect(e.pos._x,e.pos._y,e.pos._w,e.pos._h);
 			}
 		});
 	},
@@ -2157,7 +2875,28 @@ Crafty.c("color", {
 	}
 });
 
-Crafty.c("image", {
+Crafty.c("Tint", {
+	_color: null,
+	_strength: 1.0,
+	
+	init: function() {
+		this.bind("draw", function d(e) {
+			var context = e.ctx || Crafty.context;
+			
+			context.fillStyle = this._color || "rgb(0,0,0)";
+			context.fillRect(e.pos._x, e.pos._y, e.pos._w, e.pos._h);
+		});
+	},
+	
+	tint: function(color, strength) {
+		this._strength = strength;
+		this._color = Crafty.toRGB(color, this._strength);
+		
+		this.trigger("change");
+	}
+});
+
+Crafty.c("Image", {
 	_repeat: "repeat",
 	ready: false,
 	
@@ -2174,29 +2913,39 @@ Crafty.c("image", {
 	
 	image: function(url, repeat) {
 		this.__image = url;
-		this._repeat = repeat || "repeat";
+		this._repeat = repeat || "no-repeat";
 		
-		if(this.has("canvas")) {
-			this.img = Crafty.assets[url];
-			if(!this.img) {
-				this.img = new Image();
-				Crafty.assets[url] = this.img;
-				this.img.src = url;
-				var self = this;
+		
+		this.img = Crafty.assets[url];
+		if(!this.img) {
+			this.img = new Image();
+			Crafty.assets[url] = this.img;
+			this.img.src = url;
+			var self = this;
+			
+			this.img.onload = function() {
+				if(self.has("Canvas")) self._pattern = Crafty.context.createPattern(self.img, self._repeat);
+				self.ready = true;
 				
-				this.img.onload = function() {
-					self._pattern = Crafty.context.createPattern(self.img, self._repeat);
-					self.ready = true;
-					self.trigger("change");
-				};
+				if(self._repeat === "no-repeat") {
+					self.w = self.img.width;
+					self.h = self.img.height;
+				}
 				
-				return this;
-			} else {
-				this.ready = true;
-				this._pattern = Crafty.context.createPattern(this.img, this._repeat);
-					
+				self.trigger("change");
+			};
+			
+			return this;
+		} else {
+			this.ready = true;
+			if(this.has("Canvas")) this._pattern = Crafty.context.createPattern(this.img, this._repeat);
+			if(this._repeat === "no-repeat") {
+				this.w = this.img.width;
+				this.h = this.img.height;
 			}
 		}
+		
+		
 		this.trigger("change");
 		
 		return this;
@@ -2206,7 +2955,7 @@ Crafty.c("image", {
 		//skip if no image
 		if(!this.ready || !this._pattern) return;
 		
-		var context = Crafty.context;
+		var context = e.ctx;
 		
 		context.fillStyle = this._pattern;
 		
@@ -2234,58 +2983,283 @@ Crafty.extend({
 		//add scene
 		this._scenes[name] = fn;
 		return;
+	},
+	
+	rgbLookup:{},
+	
+	toRGB: function(hex,alpha) {
+		var lookup = this.rgbLookup[hex];
+		if(lookup) return lookup;
+		
+		var hex = (hex.charAt(0) === '#') ? hex.substr(1) : hex,
+			c = [], result;
+			
+		c[0] = parseInt(hex.substr(0, 2), 16);
+		c[1] = parseInt(hex.substr(2, 2), 16);
+		c[2] = parseInt(hex.substr(4, 2), 16);
+			
+		result = alpha === undefined ? 'rgb('+c.join(',')+')' : 'rgba('+c.join(',')+','+alpha+')';
+		lookup = result;
+		
+		return result;
 	}
 });
 
-Crafty.DrawList = (function() {
-	var list = [];
+/**
+* Draw Manager will manage objects to be drawn and implement
+* the best method of drawing in both DOM and canvas
+*/
+Crafty.DrawManager = (function() {
+	/** array of dirty rects on screen */
+	var register = [],
+	/** array of DOMs needed updating */
+		dom = [],
+	/** temporary canvas object */
+		canv,
+	/** context of canvas object */
+		ctx;
 	
-	if(!Array.prototype.indexOf) {
-		Array.prototype.indexOf = function(obj, start) {
-			for (var i = (start || 0), j = this.length; i < j; i++) {
-				if (this[i] == obj) { return i; }
-			}
-			return -1;
-		};
-	}
+	canv = document.createElement("canvas");
+	if('getContext' in canv) ctx = canv.getContext('2d');
 	
 	return {
-		add: function add(obj) {
-			if(list.indexOf(obj) === -1) {
-				list.push(obj);
-				list.sort(function(a,b) { return a._global - b._global; });
-			}
+		/** Quick count of 2D objects */
+		total2D: Crafty("2D").length,
+		
+		onScreen: function(rect) {
+			return Crafty.viewport._x + rect._x + rect._w > 0 && Crafty.viewport._y + rect._y + rect._h > 0 &&
+				   Crafty.viewport._x + rect._x < Crafty.viewport.width && Crafty.viewport._y + rect._y < Crafty.viewport.height;
 		},
 		
-		remove: function remove(obj) {
-			var index = list.indexOf(obj);
-			if(index !== -1) {
-				list.splice(index, 1);
-			}
-		},
-		
-		draw: function draw() {
-			if(!this.change) return; //only draw if something changed
-			
-			if(Crafty.context) Crafty.context.clearRect(0,0, Crafty._canvas.width, Crafty._canvas.height);
-			var i = 0, l = list.length;
-			for(;i<l;i++) {
-				if(!list[i] || !('draw' in list[i])) {
-					this.remove(list[i]);
-					continue;
+		merge: function(set) {
+			do {
+				var newset = [], didMerge = false, i = 0,
+					l = set.length, current, next, merger;
+				
+				while(i < l) {
+					current = set[i];
+					next = set[i+1];
+					
+					if(i < l - 1 && current._x < next._x + next._w && current._x + current._w > next._x &&
+									current._y < next._y + next._h && current._h + current._y > next._y) {	
+						
+						merger = {
+							_x: ~~Math.min(current._x, next._x),
+							_y: ~~Math.min(current._y, next._y),
+							_w: Math.max(current._x, next._x) + Math.max(current._w, next._w),
+							_h: Math.max(current._y, next._y) + Math.max(current._h, next._h)
+						};
+						merger._w = merger._w - merger._x;
+						merger._h = merger._h - merger._y;
+						merger._w = (merger._w == ~~merger._w) ? merger._w : merger._w + 1 | 0;
+						merger._h = (merger._h == ~~merger._h) ? merger._h : merger._h + 1 | 0;
+						
+						newset.push(merger);
+					
+						i++;
+						didMerge = true;
+					} else newset.push(current);
+					i++;
 				}
-				list[i].draw();
+
+				set = newset.length ? Crafty.clone(newset) : set;
+				
+				if(didMerge) i = 0;
+			} while(didMerge);
+			
+			return set;
+		},
+		
+		/**
+		* Calculate the bounding rect of dirty data
+		* and add to the register
+		*
+		* Opacity error: Clears same area, redraws one section, redraws OVER the same area.
+		*/
+		add: function add(old,current) {
+			if(!current) {
+				dom.push(old);
+				return;
 			}
-			this.change = false;
+			
+			var rect,
+				before = old._mbr || old,
+				after = current._mbr || current;
+				
+			if(old === current) {
+				rect = old.mbr() || old.pos();
+			} else {
+				rect =  {
+					_x: ~~Math.min(before._x, after._x),
+					_y: ~~Math.min(before._y, after._y),
+					_w: Math.max(before._w, after._w) + Math.max(before._x, after._x),
+					_h: Math.max(before._h, after._h) + Math.max(before._y, after._y)
+				};
+				
+				rect._w = (rect._w - rect._x);
+				rect._h = (rect._h - rect._y);
+			}
+			
+			if(rect._w === 0 || rect._h === 0 || !this.onScreen(rect)) {
+				return false;
+			}
+			
+			//floor/ceil
+			rect._x = ~~rect._x;
+			rect._y = ~~rect._y;
+			rect._w = (rect._w === ~~rect._w) ? rect._w : rect._w + 1 | 0;
+			rect._h = (rect._h === ~~rect._h) ? rect._h : rect._h + 1 | 0;
+			
+			//add to register, check for merging
+			register.push(rect);
+			
+			//if it got merged
+			return true;
 		},
 		
-		resort: function resort() {
-			list.sort(function(a,b) { return a._global - b._global; });
+		debug: function() {
+			console.log(register, dom);
 		},
 		
-		debug: function() { return list; },
-		
-		change: false
+		drawAll: function(rect) {
+			var rect = rect || Crafty.viewport.rect(), q,
+				i = 0, l, ctx = Crafty.context,
+				current;
+			
+			q = Crafty.map.search(rect);
+			l = q.length;
+			
+			ctx.clearRect(rect._x, rect._y, rect._w, rect._h);
+			
+			q.sort(function(a,b) { return a._global - b._global; });
+			for(;i<l;i++) {
+				current = q[i];
+				if(current._visible && current.__c.Canvas) {
+					current.draw();
+					current._changed = false;
+				}
+			}
+		},
+
+		/**
+		* Calculate the common bounding rect of multiple canvas entities
+		* Returns coords
+		*/
+		boundingRect: function(set) {
+			if (!set || !set.length) return;
+			var newset = [], i = 1,
+			l = set.length, current, master=set[0], tmp;
+			master=[master._x, master._y, master._x + master._w, master._y + master._h];
+			while(i < l) {
+				current = set[i];
+				tmp = [current._x, current._y, current._x + current._w, current._y + current._h];
+				if (tmp[0]<master[0]) master[0] = tmp[0];
+				if (tmp[1]<master[1]) master[1] = tmp[1];
+				if (tmp[2]>master[2]) master[2] = tmp[2];
+				if (tmp[3]>master[3]) master[3] = tmp[3];
+				i++;
+			}
+			tmp=master;
+			master={_x:tmp[0],_y:tmp[1],_w:tmp[2]-tmp[0],_h:tmp[3]-tmp[1]};
+
+			return master;
+		},
+
+		/**
+		* Redraw all the dirty regions
+		*/
+		draw: function draw() {
+			//if nothing in register, stop
+			if(!register.length && !dom.length) return;
+			
+			var i = 0, l = register.length, k = dom.length, rect, q,
+				j, len, dupes, obj, ent, objs = [];
+				
+			//loop over all DOM elements needing updating
+			for(;i<k;++i) {
+				dom[i].draw()._changed = false;
+			}
+			//reset counter and DOM array
+			dom.length = i = 0;
+			
+			//again, stop if nothing in register
+			if(!l) { return; }
+			
+			//if the amount of rects is over 60% of the total objects
+			//do the naive method redrawing
+			if(l / this.total2D > 0.6) {
+				this.drawAll();
+				register.length = 0;
+				return;
+			}
+			
+			register = this.merge(register);
+			for(;i<l;++i) { //loop over every dirty rect
+				rect = register[i];
+				if(!rect) continue;
+				q = Crafty.map.search(rect); //search for ents under dirty rect
+				
+				dupes = {};
+				
+				//loop over found objects removing dupes and adding to obj array
+				for(j = 0, len = q.length; j < len; ++j) {
+					obj = q[j];
+					
+					if(dupes[obj[0]] || !obj._visible || !obj.has("Canvas"))
+						continue;
+					dupes[obj[0]] = true;
+					
+					objs.push({obj: obj, rect: rect});
+				}
+				
+				//clear the rect from the main canvas
+				Crafty.context.clearRect(rect._x, rect._y, rect._w, rect._h);
+			}
+			
+			//sort the objects by the global Z
+			objs.sort(function(a,b) { return a.obj._global - b.obj._global; });
+			if(!objs.length){  return; }
+			
+			//loop over the objects
+			for(i = 0, l = objs.length; i < l; ++i) {
+				obj = objs[i];
+				rect = obj.rect;
+				ent = obj.obj;
+				
+				var area = ent._mbr || ent, 
+					x = (rect._x - area._x <= 0) ? 0 : ~~(rect._x - area._x),
+					y = (rect._y - area._y < 0) ? 0 : ~~(rect._y - area._y),
+					w = ~~Math.min(area._w - x, rect._w - (area._x - rect._x), rect._w, area._w),
+					h = ~~Math.min(area._h - y, rect._h - (area._y - rect._y), rect._h, area._h);
+				
+				//no point drawing with no width or height
+				if(h === 0 || w === 0) continue;
+				
+				//if it is a pattern or has some rotation, draw it on the temp canvas
+				if(ent.has('image') || ent._mbr) {
+					canv.width = area._w;
+					canv.height = area._h;
+					
+					ctx.save();
+					ctx.translate(-area._x, -area._y);
+					ent.draw(ctx);
+					Crafty.context.drawImage(canv, x, y, w, h, area._x + x, area._y + y, w, h);
+					ctx.restore();
+					ctx.clearRect(0,0,canv.width, canv.height);
+				//if it is axis-aligned and no pattern, draw subrect
+				} else {
+					ent.draw(x,y,w,h);
+				}
+				
+				//allow entity to re-register
+				ent._changed = false;
+			}
+			
+			//empty register
+			register.length = 0;
+			//all merged IDs are now invalid
+			merged = {};
+		}
 	};
 })();
 
@@ -2380,9 +3354,326 @@ Crafty.extend({
 	}
 });
 
+//Particle component
+//Based on Parcycle by Mr. Speaker, licensed under the MIT,
+//Ported by Leo Koppelkamm
+//**This is canvas only & won't do anything if the browser doesn't support it!**
+
+Crafty.c("particles", {
+	init: function () {
+		//We need to clone it
+		this._Particles = Crafty.clone(this._Particles);
+	},
+	particles: function (options) {
+
+		if (!Crafty.support.canvas || Crafty.deactivateParticles) return this;
+
+		//If we drew on the main canvas, we'd have to redraw 
+		//potentially huge sections of the screen every frame
+		//So we create a separate canvas, where we only have to redraw 
+		//the changed particles.
+		var c, ctx, relativeX, relativeY, bounding;
+
+		c = document.createElement("canvas");
+		c.width = Crafty.viewport.width;
+		c.height = Crafty.viewport.height;
+		c.style.position = 'absolute';
+
+		Crafty.stage.elem.appendChild(c);
+
+		ctx = c.getContext('2d');
+
+		this._Particles.init(options);
+
+		relativeX = this.x + Crafty.viewport.x;
+		relativeY = this.y + Crafty.viewport.y;
+		this._Particles.position = this._Particles.vectorHelpers.create(relativeX, relativeY);
+
+		var oldViewport = {x: Crafty.viewport.x, y:Crafty.viewport.y};
+		
+		this.bind('enterframe', function () {
+			relativeX = this.x + Crafty.viewport.x;
+			relativeY = this.y + Crafty.viewport.y;
+			this._Particles.viewportDelta = {x: Crafty.viewport.x - oldViewport.x, y: Crafty.viewport.y - oldViewport.y};
+
+			oldViewport = {x: Crafty.viewport.x, y:Crafty.viewport.y};
+				
+			this._Particles.position = this._Particles.vectorHelpers.create(relativeX, relativeY);
+
+			//Selective clearing
+			if (typeof Crafty.DrawManager.boundingRect == 'function') {
+				bounding = Crafty.DrawManager.boundingRect(this._Particles.register);
+				if (bounding) ctx.clearRect(bounding._x, bounding._y, bounding._w, bounding._h);
+			} else {
+				ctx.clearRect(0, 0, Crafty.viewport.width, Crafty.viewport.height);
+			}
+
+			//This updates all particle colors & positions
+			this._Particles.update();
+
+			//This renders the updated particles
+			this._Particles.render(ctx);
+		});
+		return this;
+	},
+	_Particles: {
+		presets: {
+			maxParticles: 150,
+			size: 18,
+			sizeRandom: 4,
+			speed: 1,
+			speedRandom: 1.2,
+			// Lifespan in frames
+			lifeSpan: 29,
+			lifeSpanRandom: 7,
+			// Angle is calculated clockwise: 12pm is 0deg, 3pm is 90deg etc.
+			angle: 65,
+			angleRandom: 34,
+			startColour: [255, 131, 0, 1],
+			startColourRandom: [48, 50, 45, 0],
+			endColour: [245, 35, 0, 0],
+			endColourRandom: [60, 60, 60, 0],
+			// Only applies when fastMode is off, specifies how sharp the gradients are drawn
+			sharpness: 20,
+			sharpnessRandom: 10,
+			// Random spread from origin
+			spread: 10,
+			// How many frames should this last
+			duration: -1,
+			// Will draw squares instead of circle gradients
+			fastMode: false,
+			gravity:{x: 0, y: 0.1},
+			// sensible values are 0-3
+			jitter: 0,
+			
+			//Don't modify the following
+			particles: [],
+			active: true,
+			particleCount: 0,
+			elapsedFrames: 0,
+			emissionRate: 0,
+			emitCounter: 0,
+			particleIndex: 0
+		},
+
+
+		init: function (options) {
+			this.position = this.vectorHelpers.create(0, 0);
+			if (typeof options == 'undefined') var options = {};
+
+			//Create current config by mergin given options and presets.
+			for (key in this.presets) {
+				if (typeof options[key] != 'undefined') this[key] = options[key];
+				else this[key] = this.presets[key];
+			}
+
+			this.emissionRate = this.maxParticles / this.lifeSpan;
+			this.positionRandom = this.vectorHelpers.create(this.spread, this.spread);
+		},
+
+		addParticle: function () {
+			if (this.particleCount == this.maxParticles) {
+				return false;
+			}
+
+			// Take the next particle out of the particle pool we have created and initialize it	
+			var particle = new this.particle(this.vectorHelpers);
+			this.initParticle(particle);
+			this.particles[this.particleCount] = particle;
+			// Increment the particle count
+			this.particleCount++;
+
+			return true;
+		},
+		RANDM1TO1: function() {
+			return Math.random() * 2 - 1;
+		},		
+		initParticle: function (particle) {
+			particle.position.x = this.position.x + this.positionRandom.x * this.RANDM1TO1();
+			particle.position.y = this.position.y + this.positionRandom.y * this.RANDM1TO1();
+
+			var newAngle = (this.angle + this.angleRandom * this.RANDM1TO1()) * (Math.PI / 180); // convert to radians
+			var vector = this.vectorHelpers.create(Math.sin(newAngle), -Math.cos(newAngle)); // Could move to lookup for speed
+			var vectorSpeed = this.speed + this.speedRandom * this.RANDM1TO1();
+			particle.direction = this.vectorHelpers.multiply(vector, vectorSpeed);
+
+			particle.size = this.size + this.sizeRandom * this.RANDM1TO1();
+			particle.size = particle.size < 0 ? 0 : ~~particle.size;
+			particle.timeToLive = this.lifeSpan + this.lifeSpanRandom * this.RANDM1TO1();
+
+			particle.sharpness = this.sharpness + this.sharpnessRandom * this.RANDM1TO1();
+			particle.sharpness = particle.sharpness > 100 ? 100 : particle.sharpness < 0 ? 0 : particle.sharpness;
+			// internal circle gradient size - affects the sharpness of the radial gradient
+			particle.sizeSmall = ~~ ((particle.size / 200) * particle.sharpness); //(size/2/100)
+			var start = [
+				this.startColour[0] + this.startColourRandom[0] * this.RANDM1TO1(),
+				this.startColour[1] + this.startColourRandom[1] * this.RANDM1TO1(),
+				this.startColour[2] + this.startColourRandom[2] * this.RANDM1TO1(),
+				this.startColour[3] + this.startColourRandom[3] * this.RANDM1TO1()
+				];
+
+			var end = [
+				this.endColour[0] + this.endColourRandom[0] * this.RANDM1TO1(),
+				this.endColour[1] + this.endColourRandom[1] * this.RANDM1TO1(),
+				this.endColour[2] + this.endColourRandom[2] * this.RANDM1TO1(),
+				this.endColour[3] + this.endColourRandom[3] * this.RANDM1TO1()
+				];
+
+			particle.colour = start;
+			particle.deltaColour[0] = (end[0] - start[0]) / particle.timeToLive;
+			particle.deltaColour[1] = (end[1] - start[1]) / particle.timeToLive;
+			particle.deltaColour[2] = (end[2] - start[2]) / particle.timeToLive;
+			particle.deltaColour[3] = (end[3] - start[3]) / particle.timeToLive;
+		},
+		update: function () {
+			if (this.active && this.emissionRate > 0) {
+				var rate = 1 / this.emissionRate;
+				this.emitCounter++;
+				while (this.particleCount < this.maxParticles && this.emitCounter > rate) {
+					this.addParticle();
+					this.emitCounter -= rate;
+				}
+				this.elapsedFrames++;
+				if (this.duration != -1 && this.duration < this.elapsedFrames) {
+					this.stop();
+				}
+			}
+
+			this.particleIndex = 0;
+			this.register = [];
+			var draw;
+			while (this.particleIndex < this.particleCount) {
+
+				var currentParticle = this.particles[this.particleIndex];
+
+				// If the current particle is alive then update it
+				if (currentParticle.timeToLive > 0) {
+
+					// Calculate the new direction based on gravity
+					currentParticle.direction = this.vectorHelpers.add(currentParticle.direction, this.gravity);
+					currentParticle.position = this.vectorHelpers.add(currentParticle.position, currentParticle.direction);
+					currentParticle.position = this.vectorHelpers.add(currentParticle.position, this.viewportDelta);
+					if (this.jitter) {
+						currentParticle.position.x += this.jitter * this.RANDM1TO1(); 
+						currentParticle.position.y += this.jitter * this.RANDM1TO1();
+					}
+					currentParticle.timeToLive--;
+
+					// Update colours
+					var r = currentParticle.colour[0] += currentParticle.deltaColour[0];
+					var g = currentParticle.colour[1] += currentParticle.deltaColour[1];
+					var b = currentParticle.colour[2] += currentParticle.deltaColour[2];
+					var a = currentParticle.colour[3] += currentParticle.deltaColour[3];
+
+					// Calculate the rgba string to draw.
+					draw = [];
+					draw.push("rgba(" + (r > 255 ? 255 : r < 0 ? 0 : ~~r));
+					draw.push(g > 255 ? 255 : g < 0 ? 0 : ~~g);
+					draw.push(b > 255 ? 255 : b < 0 ? 0 : ~~b);
+					draw.push((a > 1 ? 1 : a < 0 ? 0 : a.toFixed(2)) + ")");
+					currentParticle.drawColour = draw.join(",");
+
+					if (!this.fastMode) {
+						draw[3] = "0)";
+						currentParticle.drawColourEnd = draw.join(",");
+					}
+
+					this.particleIndex++;
+				} else {
+					// Replace particle with the last active 
+					if (this.particleIndex != this.particleCount - 1) {
+						this.particles[this.particleIndex] = this.particles[this.particleCount - 1];
+					}
+					this.particleCount--;
+				}
+				var rect = {};
+				rect._x = ~~currentParticle.position.x;
+				rect._y = ~~currentParticle.position.y;
+				rect._w = currentParticle.size;
+				rect._h = currentParticle.size;
+
+				this.register.push(rect);
+			}
+		},
+
+		stop: function () {
+			this.active = false;
+			this.elapsedFrames = 0;
+			this.emitCounter = 0;
+		},
+
+		render: function (context) {
+
+			for (var i = 0, j = this.particleCount; i < j; i++) {
+				var particle = this.particles[i];
+				var size = particle.size;
+				var halfSize = size >> 1;
+
+				if (particle.position.x + size < 0 
+					|| particle.position.y + size < 0 
+					|| particle.position.x - size > Crafty.viewport.width 
+					|| particle.position.y - size > Crafty.viewport.height) {
+					//Particle is outside
+					continue;
+				}
+				var x = ~~particle.position.x;
+				var y = ~~particle.position.y;
+
+				if (this.fastMode) {
+					context.fillStyle = particle.drawColour;
+				} else {
+					var radgrad = context.createRadialGradient(x + halfSize, y + halfSize, particle.sizeSmall, x + halfSize, y + halfSize, halfSize);
+					radgrad.addColorStop(0, particle.drawColour);
+					//0.9 to avoid visible boxing
+					radgrad.addColorStop(0.9, particle.drawColourEnd);
+					context.fillStyle = radgrad;
+				}
+				context.fillRect(x, y, size, size);
+			}
+		},
+		particle: function (vectorHelpers) {
+			this.position = vectorHelpers.create(0, 0);
+			this.direction = vectorHelpers.create(0, 0);
+			this.size = 0;
+			this.sizeSmall = 0;
+			this.timeToLive = 0;
+			this.colour = [];
+			this.drawColour = "";
+			this.deltaColour = [];
+			this.sharpness = 0;
+		},
+		vectorHelpers: {
+			create: function (x, y) {
+				return {
+					"x": x,
+					"y": y
+				};
+			},
+			multiply: function (vector, scaleFactor) {
+				vector.x *= scaleFactor;
+				vector.y *= scaleFactor;
+				return vector;
+			},
+			add: function (vector1, vector2) {
+				vector1.x += vector2.x;
+				vector1.y += vector2.y;
+				return vector1;
+			}
+		}
+	}
+});
+
 Crafty.extend({
 	audio: {
 		_elems: {},
+		_muted: false,
+		_mutedAudio : [],
+		/**@
+		* #Crafty.audio.MAX_CHANNELS
+		* Amount of Audio objects for a sound so overlapping of the 
+		* same sound can occur. More channels means more of the same sound
+		* playing at the same time.
+		*/
 		MAX_CHANNELS: 5,
 		
 		type: {
@@ -2392,6 +3683,49 @@ Crafty.extend({
 			'mp4': 'audio/mp4; codecs="mp4a.40.2"'
 		},
 		
+		/**@
+		* #Crafty.audio.add
+		* @category Audio
+		* @sign public this Crafty.audio.add(String id, String url)
+		* @param id - A string to reffer to sounds
+		* @param url - A string pointing to the sound file
+		* @sign public this Crafty.audio.add(String id, Array urls)
+		* @param urls - Array of urls pointing to different format of the same sound, selecting the first that is playable
+		* @sign public this Crafty.audio.add(Object map)
+		* @param map - key-value pairs where the key is the `id` and the value is either a `url` or `urls`
+		* 
+		* Loads a sound to be played. Due to the nature of HTML5 audio, 
+		* three types of audio files will be required for cross-browser capabilities. 
+		* These formats are MP3, Ogg and WAV.
+		*
+		* Passing an array of URLs will determine which format the browser can play and select it over any other.
+		*
+		* Accepts an object where the key is the audio name (needed to play) and 
+		* either a URL or an Array of URLs to determine which type to use.
+		*
+		* @example
+		* ~~~
+		* //adding audio from an object
+		* Crafty.audio.add({
+		* 	shoot: ["sounds/shoot.wav",  
+		* 			"sounds/shoot.mp3", 
+		* 			"sounds/shoot.ogg"],
+		* 
+		* 	coin: "sounds/coin.mp3"
+		* });
+		* 
+		* //adding a single sound
+		* Crafty.audio.add("walk", [
+		* 	"sounds/walk.mp3",
+		* 	"sounds/walk.ogg",
+		* 	"sounds/walk.wav"
+		* ]);
+		* 
+		* //only one format
+		* Crafty.audio.add("jump", "sounds/jump.mp3");
+		* ~~~
+		* @see Crafty.audio.play, Crafty.audio.settings
+		*/
 		add: function(id, url) {
 			if(!Crafty.support.audio) return this;
 			
@@ -2466,13 +3800,40 @@ Crafty.extend({
 				audio.load();
 				sounds.push(audio);
 			}
-			this._elems[key] = sounds;
-			if(!Crafty.assets[url]) Crafty.assets[url] = this._elems[key][0];
+			this._elems[id] = sounds;
+			if(!Crafty.assets[url]) Crafty.assets[url] = this._elems[id][0];
 			
-			return this;		
+			return this;
 		},
-		
-		play: function(id) {
+		/**@
+		* #Crafty.audio.play
+		* 
+		* `public this Crafty.audio.play(String id)`
+		* 
+		* `public this Crafty.audio.play(String id, Number repeatCount)`
+		* 
+		* `public this Crafty.audio.add(Object map)`
+		* 
+		* **Parameters:**
+		* 
+		*> `id` - A string to reffer to sounds
+		*> 
+		*> `repeatCount` - Repeat count for the file, where -1 stands for repeat infinitively.
+		* 
+		* Will play a sound previously added by using the ID that was used to add.
+		* Has a default maximum of 5 channels so that the same sound can play simultaneously unless all of the channels are playing. 
+		* This can be increased by setting Crafty.audio.MAX_CHANNELS.
+		* Note that the implementation of HTML5 Audio is buggy at best so any inconsistencies is most likely the browsers fault.
+		*
+		* ##Use
+		*~~~
+		* Crafty.audio.play("walk");
+		*
+		* //play and repeat forever
+		* Crafty.audio.play("backgroundMusic", -1);
+		* ~~~
+		*/
+		play: function(id, repeat) {
 			if(!Crafty.support.audio) return;
 			
 			var sounds = this._elems[id],
@@ -2490,7 +3851,16 @@ Crafty.extend({
 					sound.play();
 				}
 			}
-			
+			if (typeof repeat == "number") {
+				var j=0;
+				//i is still set to the sound we played
+				sounds[i].addEventListener('ended', function(){
+					if (repeat == -1 || j <= repeat){
+						this.currentTime = 0;
+						j++;
+					}
+				}, false);
+			}
 			return this;
 		},
 		
@@ -2516,11 +3886,45 @@ Crafty.extend({
 			}
 			
 			return this;
+		},
+		
+		mute: function() {
+			this._muted = true;
+			var sounds, sound, i, l, elem;
+			
+			//loop over every sound
+			for(sounds in this._elems) {
+				elem = this._elems[sounds];
+				
+				//loop over every channel for a sound
+				for(i = 0, l = elem.length; i < l; ++i) {
+					sound = elem[i];
+					
+					//if playing, stop
+					if(!sound.ended && sound.currentTime) {
+						this._mutedAudio.push(sound);
+						sound.pause();
+						//sound.currentTime = 0;
+					}
+				}
+			}
+		},
+		
+		unMute: function() {
+			this._muted = false;
+			for (var i=0; i < this._mutedAudio.length; i++) {
+				this._mutedAudio[i].play();
+			}
+			this._mutedAudio = [];
 		}
 	}
 });
 
-Crafty.c("text", {
+//stop sounds on Pause
+Crafty.bind("Pause", function() {Crafty.audio.mute()});
+Crafty.bind("Unpause", function() {Crafty.audio.unMute()});
+
+Crafty.c("Text", {
 	_text: "",
 	_font: "",
 	
@@ -2576,28 +3980,110 @@ Crafty.c("health", {
 	}
 });
 
-Crafty.c("score", {
-	_score: 0,
+/**@
+* #Score
+* Keep a score for an entity.
+*/
+Crafty.c("Score", {
+	score: 0,
 	
+	/**@
+	* #incrementScore
+	* `public this incrementScore(Number by)`
+	*
+	* **Parameters:**
+	* `by`
+	* :   Number Amount to increment the score
+	* **Events:**
+	* `ScoreDown`
+	* : Throws event when subtracted with the score and difference
+	*
+	* Adds a value onto the overall score for the current entity.
+	*/
 	incrementScore: function(by) {
-		this._score += by;
+		this.score += by;
 		
+		this.trigger("ScoreUp", {score: this._score, diff: by});
 		return this;
 	},
 	
+	/**@
+	* #decrementScore
+	* `public this decrementScore(Number by)`
+	*
+	* **Parameters:**
+	* `by`
+	* :   Number Amount to decrement the score
+	* **Events:**
+	* `ScoreDown`
+	* : Throws event when subtracted with the score and difference
+	*
+	* Subtracts a value onto the overall score for the current entity.
+	*/
 	decrementScore: function(by) {
-		this._score -= by;
+		this.score -= by;
 		
+		this.trigger("ScoreDown", {score: this._score, diff: by});
 		return this;
 	}
 });
 
-/**
-* Loader to load assets
-*/
 Crafty.extend({
+	/**@
+	* Crafty.assets
+	* ===
+	* An object containing every asset used in the current Crafty game. 
+	* The key is the URL and the value is the Audio or Image object.
+    *
+	* If loading an asset, check that it is in this object first to avoid loading.
+	*
+	* Use
+	* ---
+	*     var isLoaded = !!Crafty.assets["images/sprite.png"];
+	*/
 	assets: {},
 	
+	/**@
+	* #Crafty.loader
+	* `public void Crafty.load(Array assets, Function onLoad[, Function onProgress, Function onError])`
+	* **Parameters:**
+	* `assets`
+	* : Array of assets to load (accepts sounds and images)
+	*
+	* `onLoad`
+	* : Callback when the assets are loaded
+	* 
+	* `onProgress`
+	* : Callback when an asset is loaded. Contains information about assets loaded
+	*
+	* `onError`
+	* : Callback when an asset fails to load
+	* 
+	* Preloader for all assets. Takes an array of URLs and 
+	* adds them to the `Crafty.assets` object.
+	* 
+	* The `onProgress` function will be passed on object with information about 
+	* the progress including how many assets loaded, total of all the assets to 
+	* load and a percentage of the progress.
+    *
+	* `onError` will be passed with the asset that couldn't load.
+	* 
+	* ##Use
+	*	 Crafty.load(["images/sprite.png", "sounds/jump.mp3"], 
+	*        function() {
+	*            //when loaded
+	*            Crafty.scene("main"); //go to main scene
+	*        },
+	*
+	*        function(e) {
+	*		 	 //progress
+	*        },
+	*
+	*        function(e) {
+	*			//uh oh, error loading
+	*        }
+	*	 );
+	*/
 	load: function(data, oncomplete, onprogress, onerror) {
 		var i = 0, l = data.length, current, obj, total = l, j = 0;
 		for(;i<l;++i) {
@@ -2606,6 +4092,8 @@ Crafty.extend({
 
 			if(Crafty.support.audio && (ext === "mp3" || ext === "wav" || ext === "ogg" || ext === "mp4")) {
 				obj = new Audio(current);
+				//Chrome doesn't trigger onload on audio, see http://code.google.com/p/chromium/issues/detail?id=77794
+				if (navigator.userAgent.indexOf('Chrome') != -1) j++;
 			} else if(ext === "jpg" || ext === "jpeg" || ext === "gif" || ext === "png") {
 				obj = new Image();
 				obj.src = current;
@@ -2633,6 +4121,11 @@ Crafty.extend({
 			obj.onerror = function() {
 				if(onerror) {
 					onerror.call(this, {loaded: j, total: total, percent: (j / total * 100)});
+				} else {
+					j++;
+					if(j === total) {
+						if(oncomplete) oncomplete();
+					}
 				}
 			};
 		}
@@ -2640,3 +4133,4 @@ Crafty.extend({
 });
 
 })(Crafty,window,window.document);
+

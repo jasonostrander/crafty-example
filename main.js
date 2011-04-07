@@ -33,7 +33,7 @@ window.onload = function() {
             Crafty.scene('main');
         };
 
-        Crafty.e('2D, DOM, mouse')
+        Crafty.e('2D, DOM, Mouse')
             .attr({w: Crafty.viewport.width, h: Crafty.viewport.height})
             .areaMap([0,0], [Crafty.viewport.width, 0], 
                 [Crafty.viewport.width, Crafty.viewport.height], 
@@ -98,7 +98,7 @@ window.onload = function() {
         // ball component player is trying to hit
         Crafty.c('ball', {
             init: function() {
-                if (!this.has('collision')) this.addComponent('collision');
+                if (!this.has('Collision')) this.addComponent('Collision');
                 if (!this.has('expand')) this.addComponent('expand');
 
                 // make it a ball
@@ -135,7 +135,7 @@ window.onload = function() {
                         this.yspeed = -this.yspeed;
                     }
                 })
-                .onhit('expand', function(data) {
+                .onHit('expand', function(data) {
                     if (data) {
                         for (var i=0; i<data.length; i++) {
                             if (this.expanding === false && data[i].obj._state !== 'idle') {
@@ -150,7 +150,7 @@ window.onload = function() {
             }
         });
 
-        var score = Crafty.e('2D, DOM, color, text')
+        var score = Crafty.e('2D, DOM, Color, Text')
             .attr({
                 x: 30,
                 y: 30,
@@ -177,7 +177,7 @@ window.onload = function() {
             var y = e.clientY - Crafty.stage.y + document.body.scrollTop + document.documentElement.scrollTop;
     
                 if (singleton == null) {
-                    singleton = Crafty.e("2D, DOM, color, expand, player")
+                    singleton = Crafty.e("2D, DOM, Color, expand, Player")
                     .attr({x:x, y:y})
                     .color('blue')
                     .css({
@@ -193,7 +193,7 @@ window.onload = function() {
             };
 
         // Only allow the player to interact once
-        Crafty.e('2D, DOM, mouse')
+        Crafty.e('2D, DOM, Mouse')
             .attr({w: Crafty.viewport.width, h: Crafty.viewport.height})
             .areaMap([0,0], [Crafty.viewport.width, 0], 
                 [Crafty.viewport.width, Crafty.viewport.height], 
@@ -202,7 +202,7 @@ window.onload = function() {
     
             // create the balls
             for (var i = 0; i<levels[current].total; i++) {
-               Crafty.e("2D, DOM, color, ball").color('red');
+               Crafty.e("2D, DOM, Color, ball").color('red');
             }
 
             // Crafty.e("2D, DOM, color, ball").color('red').attr({xspeed: 0, yspeed: 0, x: 200, y:200});
