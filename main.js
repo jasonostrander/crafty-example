@@ -108,9 +108,6 @@ window.onload = function() {
                     '-webkit-border-radius': '64px'
                 });
 
-                // Simulate cirle collision area with polygon
-                // this.collision(new Crafty.polygon([8,0], [16,8], [8,16], [0,8]) );
-
                 this.attr({
                     x: (Crafty.viewport.width-16) * Math.random(),
                     y: (Crafty.viewport.height-16)*Math.random(),
@@ -149,6 +146,44 @@ window.onload = function() {
                 });
             }
         });
+
+        // Override the default hit function, to provide circle collision
+        Crafty.components()['Collision'].hit = function(comp) {
+            var area = this._mbr || this,
+                results = Crafty.map.search(area, false),
+                i = 0, l = results.length,
+                dupes = {},
+                id, obj, oarea, key,
+                hasMap = ('map' in this && 'containsPoint' in this.map),
+                finalresult = [];
+            
+            if(!l) {
+                return false;
+            }
+            
+            for(;i<l;++i) {
+                obj = results[i];
+                oarea = obj._mbr || obj; //use the mbr
+                
+                if(!obj) continue;
+                id = obj[0];
+                
+                // Find the center
+                var hyp = Math.sqrt(Math.pow(Math.abs((area._y + area._h/2) - (oarea._y + oarea._h/2)), 2) + 
+                    Math.pow(Math.abs((area._x + area._w/2) - (oarea._x + oarea._w/2)), 2));
+
+                //check if not added to hash and that actually intersects
+                if(!dupes[id] && this[0] !== id && obj.__c[comp] && 
+                                 hyp < area._w/2 + oarea._w/2)
+                   finalresult.push({obj: obj, type: "MBR"});
+            }
+            
+            if(!finalresult.length) {
+                return false;
+            }
+            
+            return finalresult;
+        };
 
         var score = Crafty.e('2D, DOM, Color, Text')
             .attr({
@@ -200,13 +235,10 @@ window.onload = function() {
                 [0, Crafty.viewport.height])
             .bind('mousedown', fn);
     
-            // create the balls
-            for (var i = 0; i<levels[current].total; i++) {
-               Crafty.e("2D, DOM, Color, ball").color('red');
-            }
-
-            // Crafty.e("2D, DOM, color, ball").color('red').attr({xspeed: 0, yspeed: 0, x: 200, y:200});
-            // Crafty.e("2D, DOM, color, ball").color('blue').attr({xspeed: 0, yspeed: 0, x: 229, y:229}).expand();
+        // create the balls
+        for (var i = 0; i<levels[current].total; i++) {
+            Crafty.e("2D, DOM, Color, ball").color('red');
+        }
 
         function updateGameState() {
             var ids = Crafty('expand').toArray();
