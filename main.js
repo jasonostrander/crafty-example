@@ -1,7 +1,11 @@
 window.onload = function() {
+    // initial ball diameter and expand muliplier
+    var diam = 12;
+    var mult = 6;
+
     //setup the Crafty game with an FPS of 50 and stage width
     //and height
-    Crafty.init(50, 580, 280);
+    Crafty.init(30, 580, 280);
     
     var levels= [
         {required:1, total:4},
@@ -61,7 +65,7 @@ window.onload = function() {
                             this._alternate = true;
                         }
 
-                        if (this.w > 64 ) {
+                        if (this.w > diam*mult ) {
                             this._state = 'collapsing';
                         }
                     } else if (this._state === 'collapsing') {
@@ -87,7 +91,6 @@ window.onload = function() {
             },
             restart: function(x,y) {
                 if (this._state !== 'expanding' && this._state !== 'collapsing') {
-                    // this.w = 16, this.h = 16;
                     this.x = x, this.y = y;
                     this._state = 'expanding';
                 }
@@ -109,10 +112,10 @@ window.onload = function() {
                 });
 
                 this.attr({
-                    x: (Crafty.viewport.width-16) * Math.random(),
-                    y: (Crafty.viewport.height-16)*Math.random(),
-                    w: 16,
-                    h: 16,
+                    x: (Crafty.viewport.width-diam) * Math.random(),
+                    y: (Crafty.viewport.height-diam)*Math.random(),
+                    w: diam,
+                    h: diam,
                     xspeed: 1,
                     yspeed: 2,
                     expanding: false
@@ -193,6 +196,7 @@ window.onload = function() {
                 w: 32,
                 _score: 0,
                 _required: levels[current].required,
+                _total: levels[current].total,
                 incrementScore: function() {
                     this._score += 1;
                     this.text(this._score + '/' + this._required);
@@ -201,6 +205,9 @@ window.onload = function() {
                     if (this._score >= this._required)
                         return true;
                     return false;
+                },
+                all: function() {
+                    return this._score >= this._total;
                 }
             })
             .text('0/'+levels[current].required)
@@ -263,6 +270,9 @@ window.onload = function() {
                         prompt = 'You won! Congratulations! Click to play again.'
                         current = 0;
                         Crafty.scene('toast');
+                    } else if (score.all()) {
+                        prompt = 'Awesome job! Click to play the next level.'
+                        Crafty.scene('toast');                        
                     } else {
                         prompt = 'Well done! Click to play the next level.'
                         Crafty.scene('toast');
